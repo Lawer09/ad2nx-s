@@ -331,6 +331,9 @@ install_bbr() {
 }
 
 update_shell() {
+    if [ -L /usr/bin/ad2nx ]; then
+        rm -f /usr/bin/ad2nx
+    fi
     github_script_download "ad2nx.sh" "/usr/bin/ad2nx"
     if [[ $? != 0 ]]; then
         echo ""
@@ -992,8 +995,7 @@ show_usage() {
 
 show_menu() {
     echo -e "
-  ${green}ad2nx 后端管理脚本，${plain}${red}不适用于docker${plain}
---- https://github.com/wyx2685/ad2nx ---
+  ${green}ad2nx 后端管理脚本
   ${green}0.${plain} 修改配置
 ————————————————
   ${green}1.${plain} 安装 ad2nx
