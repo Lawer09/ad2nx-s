@@ -1,0 +1,20 @@
+[Unit]
+Description=ad2nx Service
+After=network.target nss-lookup.target
+Wants=network.target
+
+[Service]
+User=root
+Group=root
+Type=simple
+LimitAS=infinity
+LimitRSS=infinity
+LimitCORE=infinity
+LimitNOFILE=999999
+WorkingDirectory=/usr/local/ad2nx/
+ExecStart=/usr/local/ad2nx/ad2nx server
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
