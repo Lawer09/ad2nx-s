@@ -242,76 +242,18 @@ install_ad2nx() {
         fi
     fi
 
-    unzip -tq ad2nx-linux.zip >/dev/null 2>&1
-    if [[ $? -ne 0 ]]; then
-        echo -e "${red}下载的文件不是有效 zip：/usr/local/ad2nx/ad2nx-linux.zip${plain}"
-        echo -e "${yellow}常见原因：Release 附件名不匹配、tag 不一致(1.0.0/v1.0.0)、私有仓库未提供 GITHUB_TOKEN、或下载被 302/404 页面替代。${plain}"
-        echo -e "${yellow}文件前 20 行（若为文本/HTML 可用于排错）：${plain}"
-        head -n 20 ad2nx-linux.zip 2>/dev/null || true
-        exit 1
-    fi
-
     unzip ad2nx-linux.zip >/dev/null 2>&1
     if [[ $? -ne 0 ]]; then
         echo -e "${red}解压失败：/usr/local/ad2nx/ad2nx-linux.zip${plain}"
         exit 1
     fi
+
     rm ad2nx-linux.zip -f
-
-    if [[ ! -f "./ad2nx" ]]; then
-        found_bin=$(find . -maxdepth 4 -type f -name "ad2nx" 2>/dev/null | head -n 1)
-        if [[ -z "${found_bin}" ]]; then
-            found_bin=$(find . -maxdepth 4 -type f -iname "ad2nx" 2>/dev/null | head -n 1)
-        fi
-        if [[ -n "${found_bin}" ]]; then
-            cp -f "${found_bin}" "./ad2nx"
-        fi
-    fi
-    if [[ ! -f "./ad2nx" ]]; then
-        echo -e "${red}解压后未找到 ad2nx 可执行文件${plain}"
-        echo -e "${yellow}解压内容（最多显示 80 行）：${plain}"
-        find . -maxdepth 3 -type f 2>/dev/null | head -n 80
-        exit 1
-    fi
-
     chmod +x ad2nx
     mkdir /etc/ad2nx/ -p
-
-    ensure_file_at_root() {
-        local filename="$1"
-        local found_path
-        if [[ -f "./${filename}" ]]; then
-            return 0
-        fi
-        found_path=$(find . -maxdepth 6 -type f -name "${filename}" 2>/dev/null | head -n 1)
-        if [[ -z "${found_path}" ]]; then
-            return 1
-        fi
-        cp -f "${found_path}" "./${filename}"
-        [[ -f "./${filename}" ]]
-    }
-
-    if [[ ! -f "./geoip.dat" ]]; then
-        found_geoip=$(find . -maxdepth 4 -type f -name "geoip.dat" 2>/dev/null | head -n 1)
-        if [[ -n "${found_geoip}" ]]; then
-            cp -f "${found_geoip}" "./geoip.dat"
-        fi
-    fi
-    if [[ ! -f "./geosite.dat" ]]; then
-        found_geosite=$(find . -maxdepth 4 -type f -name "geosite.dat" 2>/dev/null | head -n 1)
-        if [[ -n "${found_geosite}" ]]; then
-            cp -f "${found_geosite}" "./geosite.dat"
-        fi
-    fi
-    if [[ ! -f "./geoip.dat" || ! -f "./geosite.dat" ]]; then
-        echo -e "${red}解压后未找到 geoip.dat/geosite.dat${plain}"
-        echo -e "${yellow}解压内容（最多显示 80 行）：${plain}"
-        find . -maxdepth 3 -type f 2>/dev/null | head -n 80
-        exit 1
-    fi
-
     cp geoip.dat /etc/ad2nx/
     cp geosite.dat /etc/ad2nx/
+
     if [[ x"${release}" == x"alpine" ]]; then
         rm /etc/init.d/ad2nx -f
         cat <<EOF > /etc/init.d/ad2nx
@@ -365,16 +307,7 @@ EOF
     fi
 
     if [[ ! -f /etc/ad2nx/config.json ]]; then
-        ensure_file_at_root "config.json"
-        if [[ $? -ne 0 ]]; then
-            echo -e "${red}解压后未找到 config.json${plain}"
-            echo -e "${yellow}解压内容（最多显示 80 行）：${plain}"
-            find . -maxdepth 3 -type f 2>/dev/null | head -n 80
-            exit 1
-        fi
         cp config.json /etc/ad2nx/
-        echo -e ""
-        echo -e "全新安装，请先参看教程：https://ad2nx.v-50.me/，配置必要的内容"
         first_install=true
     else
         if [[ x"${release}" == x"alpine" ]]; then
@@ -394,36 +327,16 @@ EOF
     fi
 
     if [[ ! -f /etc/ad2nx/dns.json ]]; then
-        ensure_file_at_root "dns.json"
-        if [[ $? -eq 0 ]]; then
-            cp dns.json /etc/ad2nx/
-        else
-            echo -e "${yellow}未在解压内容中找到 dns.json，已跳过复制${plain}"
-        fi
+        cp dns.json /etc/ad2nx/
     fi
     if [[ ! -f /etc/ad2nx/route.json ]]; then
-        ensure_file_at_root "route.json"
-        if [[ $? -eq 0 ]]; then
-            cp route.json /etc/ad2nx/
-        else
-            echo -e "${yellow}未在解压内容中找到 route.json，已跳过复制${plain}"
-        fi
+        cp route.json /etc/ad2nx/
     fi
     if [[ ! -f /etc/ad2nx/custom_outbound.json ]]; then
-        ensure_file_at_root "custom_outbound.json"
-        if [[ $? -eq 0 ]]; then
-            cp custom_outbound.json /etc/ad2nx/
-        else
-            echo -e "${yellow}未在解压内容中找到 custom_outbound.json，已跳过复制${plain}"
-        fi
+        cp custom_outbound.json /etc/ad2nx/
     fi
     if [[ ! -f /etc/ad2nx/custom_inbound.json ]]; then
-        ensure_file_at_root "custom_inbound.json"
-        if [[ $? -eq 0 ]]; then
-            cp custom_inbound.json /etc/ad2nx/
-        else
-            echo -e "${yellow}未在解压内容中找到 custom_inbound.json，已跳过复制${plain}"
-        fi
+        cp custom_inbound.json /etc/ad2nx/
     fi
     github_contents_download "ad2nx.sh" "/usr/bin/ad2nx"
     chmod +x /usr/bin/ad2nx
