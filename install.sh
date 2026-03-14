@@ -434,7 +434,7 @@ EOF
     cd $cur_dir
     rm -f install.sh
     echo -e ""
-    echo "ad2nx 管理脚本使用方法 (兼容使用ad2nx执行，大小写不敏感): "
+    echo "ad2nx 管理脚本使用方法 (大小写不敏感): "
     echo "------------------------------------------"
     echo "ad2nx              - 显示管理菜单 (功能更多)"
     echo "ad2nx start        - 启动 ad2nx"
