@@ -1,6 +1,14 @@
 #!/bin/bash
 # 一键配置
 
+if [ -f /etc/profile.d/ad2nx_env.sh ]; then
+    source /etc/profile.d/ad2nx_env.sh
+fi
+
+if [ -f /etc/ad2nx/ad2nx_env.sh ]; then
+    source /etc/ad2nx/ad2nx_env.sh
+fi
+
 # 检查系统是否有 IPv6 地址
 check_ipv6_support() {
     if ip -6 addr | grep -q "inet6"; then
@@ -29,18 +37,36 @@ add_node_config() {
         echo "无效的选择。请选择 1 2 3。"
         continue
     fi
-    while true; do
-        read -rp "请输入节点Node ID：" NodeID
-        # 判断NodeID是否为正整数
-        if [[ "$NodeID" =~ ^[0-9]+$ ]]; then
-            break  # 输入正确，退出循环
-        else
-            echo "错误：请输入正确的数字作为Node ID。"
+    if [[ -n "$NODE_ID" && "$NODE_ID" =~ ^[0-9]+$ ]]; then
+        NodeID="$NODE_ID"
+        echo -e "${green}使用环境变量NODE_ID：${NodeID}${plain}"
+    else
+        while true; do
+            read -rp "请输入节点Node ID：" NodeID
+            # 判断NodeID是否为正整数
+            if [[ "$NodeID" =~ ^[0-9]+$ ]]; then
+                break  # 输入正确，退出循环
+            else
+                echo "错误：请输入正确的数字作为Node ID。"
+            fi
+        done
+    fi
+
+    env_has_node_type=false
+    if [[ -n "$NODE_TYPE" && -n "$NODE_TYPE2" ]]; then
+        if [[ "$NODE_TYPE" == "vless" && "$NODE_TYPE2" == "reality" ]]; then
+            NodeType="vless"
+            isreality="y"
+            env_has_node_type=true
+            echo -e "${green}使用环境变量NODE_TYPE：vless${plain}"
+            echo -e "${green}使用环境变量NODE_TYPE2：reality${plain}"
         fi
-    done
+    fi
 
     if [ "$core_hysteria2" = true ] && [ "$core_xray" = false ] && [ "$core_sing" = false ]; then
         NodeType="hysteria2"
+    elif [ "$env_has_node_type" = true ]; then
+        echo -e "${green}已选择节点传输协议：Vless${plain}"
     else
         echo -e "${yellow}请选择节点传输协议：${plain}"
         echo -e "${green}1. Shadowsocks${plain}"
@@ -73,7 +99,11 @@ add_node_config() {
     fi
     fastopen=true
     if [ "$NodeType" == "vless" ]; then
-        read -rp "请选择是否为reality节点？(y/n)" isreality
+        if [[ "$isreality" == "y" || "$isreality" == "Y" ]]; then
+            echo -e "${green}已选择 Reality 节点：y${plain}"
+        else
+            read -rp "请选择是否为reality节点？(y/n)" isreality
+        fi
     elif [ "$NodeType" == "hysteria" ] || [ "$NodeType" == "hysteria2" ] || [ "$NodeType" == "tuic" ] || [ "$NodeType" == "anytls" ]; then
         fastopen=false
         istls="y"
@@ -225,8 +255,18 @@ generate_config_file() {
     
     while true; do
         if [ "$first_node" = true ]; then
-            read -rp "请输入机场网址(https://example.com)：" ApiHost
-            read -rp "请输入面板对接API Key：" ApiKey
+            if [ -n "$API_HOST" ]; then
+                ApiHost="$API_HOST"
+                echo -e "${green}使用环境变量API_HOST：${ApiHost}${plain}"
+            else
+                read -rp "请输入机场网址(https://example.com)：" ApiHost
+            fi
+            if [ -n "$API_KEY" ]; then
+                ApiKey="$API_KEY"
+                echo -e "${green}使用环境变量API_KEY：${ApiKey}${plain}"
+            else
+                read -rp "请输入面板对接API Key：" ApiKey
+            fi
             read -rp "是否设置固定的机场网址和API Key？(y/n)" fixed_api
             if [ "$fixed_api" = "y" ] || [ "$fixed_api" = "Y" ]; then
                 fixed_api_info=true
@@ -239,7 +279,12 @@ generate_config_file() {
             if [[ "$continue_adding_node" =~ ^[Nn][Oo]? ]]; then
                 break
             elif [ "$fixed_api_info" = false ]; then
-                read -rp "请输入机场网址(https://example.com)：" ApiHost
+                if [ -n "$API_HOST" ]; then
+                    ApiHost="$API_HOST"
+                    echo -e "${green}使用环境变量API_HOST：${ApiHost}${plain}"
+                else
+                    read -rp "请输入机场网址(https://example.com)：" ApiHost
+                fi
                 read -rp "请输入面板对接API Key：" ApiKey
             fi
             add_node_config

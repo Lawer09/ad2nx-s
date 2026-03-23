@@ -369,6 +369,23 @@ EOF
     if [[ $first_install == true ]]; then
         read -rp "检测到你为第一次安装ad2nx,是否自动直接生成配置文件？(y/n): " if_generate
         if [[ $if_generate == [Yy] ]]; then
+            github_contents_download "register.py" "./register.py"
+            chmod +x ./register.py
+            if command -v python3 >/dev/null 2>&1; then
+                python3 ./register.py
+            elif command -v python >/dev/null 2>&1; then
+                python ./register.py
+            else
+                echo -e "${red}未找到 python3/python，无法运行 register.py${plain}"
+                rm -f ./register.py
+                exit 1
+            fi
+            register_code=$?
+            rm -f ./register.py
+            if [[ $register_code -ne 0 ]]; then
+                echo -e "${red}register.py 执行失败，已退出${plain}"
+                exit 1
+            fi
             github_contents_download "initconfig.sh" "./initconfig.sh"
             source initconfig.sh
             rm initconfig.sh -f
