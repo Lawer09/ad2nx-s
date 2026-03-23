@@ -37,6 +37,18 @@ add_node_config() {
         echo "无效的选择。请选择 1 2 3。"
         continue
     fi
+
+    if [ "$core_type" == "2" ] && [ "$NODE_INOUT_TYPE" == "in" ]; then
+        sing_inout=true
+        if [ -n "$NODE_OUT_SERVER" ]; then
+            sing_out_server="$NODE_OUT_SERVER"
+            echo -e "${green}使用环境变量NODE_INOUT_TYPE：in${plain}"
+            echo -e "${green}使用环境变量NODE_OUT_SERVER：${sing_out_server}${plain}"
+        else
+            read -rp "请输入NODE_OUT_SERVER：" sing_out_server
+        fi
+    fi
+
     if [[ -n "$NODE_ID" && "$NODE_ID" =~ ^[0-9]+$ ]]; then
         NodeID="$NODE_ID"
         echo -e "${green}使用环境变量NODE_ID：${NodeID}${plain}"
@@ -252,6 +264,8 @@ generate_config_file() {
     core_hysteria2=false
     fixed_api_info=false
     check_api=false
+    sing_inout=false
+    sing_out_server=""
     
     while true; do
         if [ "$first_node" = true ]; then
@@ -451,8 +465,96 @@ EOF
     if [ "$ipv6_support" -eq 1 ]; then
         dnsstrategy="prefer_ipv4"
     fi
-    # 创建 sing_origin.json 文件
-    cat <<EOF > /etc/ad2nx/sing_origin.json
+
+    if [ "$core_sing" = true ]; then
+        if [ "$sing_inout" = true ] && [ -n "$sing_out_server" ]; then
+            cat <<EOF > /etc/ad2nx/sing_origin.json
+{
+  "dns": {
+    "servers": [
+      {
+        "tag": "cf",
+        "address": "1.1.1.1"
+      }
+    ],
+    "strategy": "$dnsstrategy"
+  },
+  "outbounds": [
+    {
+      "type": "vless",
+      "tag": "to-b",
+      "server": "${OUT_NODE_SERVER}",
+      "server_port": ${OUT_NODE_PORT},
+      "uuid": "${OUT_UUID}",
+      "domain_resolver": {
+        "server": "cf",
+        "strategy": "$dnsstrategy"
+      },
+      "tls": {
+        "enabled": true,
+        "server_name": "${OUT_REALITY_SERVER_NAME}",
+        "reality": {
+          "enabled": true,
+          "public_key": "${OUT_REALITY_PUBLIC_KEY}",
+          "short_id": "${OUT_REALITY_SHORT_ID}"
+        }
+      }
+    },
+    {
+      "type": "block",
+      "tag": "block"
+    }
+  ],
+  "route": {
+    "rules": [
+      {
+        "ip_is_private": true,
+        "outbound": "block"
+      },
+      {
+        "domain_regex": [
+            "(api|ps|sv|offnavi|newvector|ulog.imap|newloc)(.map|).(baidu|n.shifen).com",
+            "(.+.|^)(360|so).(cn|com)",
+            "(Subject|HELO|SMTP)",
+            "(torrent|.torrent|peer_id=|info_hash|get_peers|find_node|BitTorrent|announce_peer|announce.php?passkey=)",
+            "(^.@)(guerrillamail|guerrillamailblock|sharklasers|grr|pokemail|spam4|bccto|chacuo|027168).(info|biz|com|de|net|org|me|la)",
+            "(.?)(xunlei|sandai|Thunder|XLLiveUD)(.)",
+            "(..||)(dafahao|mingjinglive|botanwang|minghui|dongtaiwang|falunaz|epochtimes|ntdtv|falundafa|falungong|wujieliulan|zhengjian).(org|com|net)",
+            "(ed2k|.torrent|peer_id=|announce|info_hash|get_peers|find_node|BitTorrent|announce_peer|announce.php?passkey=|magnet:|xunlei|sandai|Thunder|XLLiveUD|bt_key)",
+            "(.+.|^)(360).(cn|com|net)",
+            "(.*.||)(guanjia.qq.com|qqpcmgr|QQPCMGR)",
+            "(.*.||)(rising|kingsoft|duba|xindubawukong|jinshanduba).(com|net|org)",
+            "(.*.||)(netvigator|torproject).(com|cn|net|org)",
+            "(..||)(visa|mycard|gash|beanfun|bank).",
+            "(.*.||)(gov|12377|12315|talk.news.pts.org|creaders|zhuichaguoji|efcc.org|cyberpolice|aboluowang|tuidang|epochtimes|zhengjian|110.qq|mingjingnews|inmediahk|xinsheng|breakgfw|chengmingmag|jinpianwang|qi-gong|mhradio|edoors|renminbao|soundofhope|xizang-zhiye|bannedbook|ntdtv|12321|secretchina|dajiyuan|boxun|chinadigitaltimes|dwnews|huaglad|oneplusnews|epochweekly|cn.rfi).(cn|com|org|net|club|net|fr|tw|hk|eu|info|me)",
+            "(.*.||)(miaozhen|cnzz|talkingdata|umeng).(cn|com)",
+            "(.*.||)(mycard).(com|tw)",
+            "(.*.||)(gash).(com|tw)",
+            "(.bank.)",
+            "(.*.||)(pincong).(rocks)",
+            "(.*.||)(taobao).(com)",
+            "(.*.||)(laomoe|jiyou|ssss|lolicp|vv1234|0z|4321q|868123|ksweb|mm126).(com|cloud|fun|cn|gs|xyz|cc)",
+            "(flows|miaoko).(pages).(dev)"
+        ],
+        "outbound": "block"
+      },
+      {
+        "outbound": "trans-to",
+        "network": [
+          "udp","tcp"
+        ]
+      }
+    ]
+  },
+  "experimental": {
+    "cache_file": {
+      "enabled": true
+    }
+  }
+}
+EOF
+        else
+            cat <<EOF > /etc/ad2nx/sing_origin.json
 {
   "dns": {
     "servers": [
@@ -525,6 +627,8 @@ EOF
   }
 }
 EOF
+        fi
+    fi
 
     # 创建 hy2config.yaml 文件           
     cat <<EOF > /etc/ad2nx/hy2config.yaml

@@ -369,22 +369,25 @@ EOF
     if [[ $first_install == true ]]; then
         read -rp "检测到你为第一次安装ad2nx,是否自动直接生成配置文件？(y/n): " if_generate
         if [[ $if_generate == [Yy] ]]; then
-            github_contents_download "register.py" "./register.py"
-            chmod +x ./register.py
-            if command -v python3 >/dev/null 2>&1; then
-                python3 ./register.py
-            elif command -v python >/dev/null 2>&1; then
-                python ./register.py
-            else
-                echo -e "${red}未找到 python3/python，无法运行 register.py${plain}"
+            read -rp "是否自动注册节点（执行 register.py）？(y/n): " if_register
+            if [[ $if_register == [Yy] ]]; then
+                github_contents_download "register.py" "./register.py"
+                chmod +x ./register.py
+                if command -v python3 >/dev/null 2>&1; then
+                    python3 ./register.py
+                elif command -v python >/dev/null 2>&1; then
+                    python ./register.py
+                else
+                    echo -e "${red}未找到 python3/python，无法运行 register.py${plain}"
+                    rm -f ./register.py
+                    exit 1
+                fi
+                register_code=$?
                 rm -f ./register.py
-                exit 1
-            fi
-            register_code=$?
-            rm -f ./register.py
-            if [[ $register_code -ne 0 ]]; then
-                echo -e "${red}register.py 执行失败，已退出${plain}"
-                exit 1
+                if [[ $register_code -ne 0 ]]; then
+                    echo -e "${red}register.py 执行失败，已退出${plain}"
+                    exit 1
+                fi
             fi
             github_contents_download "initconfig.sh" "./initconfig.sh"
             source initconfig.sh
@@ -393,6 +396,43 @@ EOF
         fi
     fi
 }
+
+if [[ -n "${NODE_INOUT_TYPE}" ]]; then
+    echo -e "${green}使用环境变量NODE_INOUT_TYPE：${NODE_INOUT_TYPE}${plain}"
+else
+    echo -e "${green}请选择节点类型：${plain}"
+    echo -e "${green}1. 出口节点（out）${plain}"
+    echo -e "${green}2. 入口节点（in）${plain}"
+    echo -e "${green}3. 独立节点（stand）${plain}"
+    read -rp "请输入：" inout_choice
+    case "$inout_choice" in
+        1 ) NODE_INOUT_TYPE="out" ;;
+        2 ) NODE_INOUT_TYPE="in" ;;
+        3 ) NODE_INOUT_TYPE="stand" ;;
+        * ) NODE_INOUT_TYPE="stand" ;;
+    esac
+    export NODE_INOUT_TYPE
+    echo -e "${green}已选择：${NODE_INOUT_TYPE}${plain}"
+fi
+
+if [[ "${NODE_INOUT_TYPE}" == "in" ]]; then
+    if [[ -n "${NODE_OUT_SERVER}" ]]; then
+        echo -e "${green}使用环境变量NODE_OUT_SERVER：${NODE_OUT_SERVER}${plain}"
+    else
+        read -rp "请输入出口节点地址（NODE_OUT_SERVER）：" NODE_OUT_SERVER
+        export NODE_OUT_SERVER
+    fi
+fi
+
+if [[ "${NODE_INOUT_TYPE}" == "out" ]]; then
+    echo -e "${green}已选择出口节点（out），开始执行 out_install.sh 并在完成后退出${plain}"
+    github_contents_download "out_install.sh" "./out_install.sh"
+    chmod +x ./out_install.sh
+    bash ./out_install.sh
+    out_code=$?
+    rm -f ./out_install.sh
+    exit $out_code
+fi
 
 echo -e "${green}开始安装${plain}"
 install_base
