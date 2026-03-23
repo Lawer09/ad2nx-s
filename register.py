@@ -306,6 +306,47 @@ def _prompt_or_env(prompt: str, env_keys: List[str], secret: bool = False) -> st
             return v
 
 
+def _prompt_with_default(prompt: str, default_value: Optional[str]) -> str:
+    if default_value is None:
+        while True:
+            v = input(prompt).strip()
+            if v:
+                return v
+    else:
+        v = input(f"{prompt}[默认: {default_value}]: ").strip()
+        return v if v else default_value
+
+
+def _prompt_or_env_or_default(prompt: str, env_keys: List[str], default_value: Optional[str]) -> str:
+    key, value = _get_env_value(env_keys)
+    if value is not None:
+        print(f"使用环境变量{key}: {value}")
+        return value
+    return _prompt_with_default(prompt, default_value)
+
+
+def _get_node_field_as_str(node: Dict[str, Any], key: str) -> Optional[str]:
+    v = node.get(key)
+    if v is None:
+        return None
+    s = str(v).strip()
+    return s if s else None
+
+
+def _get_node_reality_server_name(node: Dict[str, Any]) -> Optional[str]:
+    ps = node.get("protocol_settings")
+    if not isinstance(ps, dict):
+        return None
+    rs = ps.get("reality_settings")
+    if not isinstance(rs, dict):
+        return None
+    v = rs.get("server_name")
+    if v is None:
+        return None
+    s = str(v).strip()
+    return s if s else None
+
+
 def main():
     print("=== 节点注册 ===\n")
 
@@ -325,13 +366,7 @@ def main():
         sys.exit(1)
     print("登录成功\n")
 
-    # 4. 输入节点参数
-    node_name = _prompt_or_env("请输入节点名称: ", ["NODE_NAME"])
-    port = _prompt_or_env("请输入连接端口（port）: ", ["NODE_PORT", "PORT"])
-    server_port = _prompt_or_env("请输入服务端口（server_port）: ", ["NODE_SERVER_PORT", "SERVER_PORT"])
-    server_name = _prompt_or_env("请输入伪装站点（server_name）: ", ["NODE_SERVER_NAME", "SERVER_NAME"])
-
-    # 5. 选择 IP
+    # 4. 选择 IP 并查询是否存在节点
     env_host_key, env_host_value = _get_env_value(["NODE_HOST", "HOST"])
     if env_host_value is not None:
         print(f"\n使用环境变量{env_host_key}: {env_host_value}")
@@ -340,24 +375,48 @@ def main():
         host = select_ip()
     print()
 
-    # 6. 生成密钥和 shortid
+    # 5. 获取现有节点列表
+    nodes = get_nodes(base_url, site_id, token)
+    print(f"获取到 {len(nodes)} 个节点\n")
+
+    # 6. 查找与所选 IP 匹配的节点
+    matched_node = None
+    for node in nodes:
+        if node.get('host') == host:
+            matched_node = node
+            break
+
+    default_node_name = None
+    default_port = None
+    default_server_port = None
+    default_server_name = None
+    if matched_node:
+        default_node_name = _get_node_field_as_str(matched_node, "name")
+        default_port = _get_node_field_as_str(matched_node, "port")
+        default_server_port = _get_node_field_as_str(matched_node, "server_port")
+        default_server_name = _get_node_reality_server_name(matched_node)
+
+        print(f"已存在节点（ID: {matched_node.get('id')}，host: {host}），当前参数：")
+        print(f"- 节点名称: {default_node_name or ''}")
+        print(f"- port: {default_port or ''}")
+        print(f"- server_port: {default_server_port or ''}")
+        print(f"- server_name: {default_server_name or ''}")
+        print()
+
+    # 7. 输入节点参数（默认使用已存在节点参数；密钥仍重新生成）
+    node_name = _prompt_or_env_or_default("请输入节点名称: ", ["NODE_NAME"], default_node_name)
+    port = _prompt_or_env_or_default("请输入连接端口（port）: ", ["NODE_PORT", "PORT"], default_port)
+    server_port = _prompt_or_env_or_default("请输入服务端口（server_port）: ", ["NODE_SERVER_PORT", "SERVER_PORT"], default_server_port)
+    server_name = _prompt_or_env_or_default("请输入伪装站点（server_name）: ", ["NODE_SERVER_NAME", "SERVER_NAME"], default_server_name)
+    print()
+
+    # 8. 生成密钥和 shortid
     print("正在生成 Reality 密钥对和 shortid...")
     private_key, public_key = generate_keys()
     shortid = generate_shortid()
     print(f"私钥: {private_key}")
     print(f"公钥: {public_key}")
     print(f"shortid: {shortid}\n")
-
-    # 7. 获取现有节点列表
-    nodes = get_nodes(base_url, site_id, token)
-    print(f"获取到 {len(nodes)} 个节点\n")
-
-    # 8. 查找与所选 IP 匹配的节点
-    matched_node = None
-    for node in nodes:
-        if node.get('host') == host:
-            matched_node = node
-            break
 
     # 9. 构造新配置
     # 新字段（要更新的部分）
