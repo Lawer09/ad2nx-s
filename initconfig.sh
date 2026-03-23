@@ -484,15 +484,19 @@ EOF
       "type": "vless",
       "tag": "to-b",
       "server": "${OUT_NODE_SERVER}",
-      "server_port": ${OUT_NODE_PORT},
-      "uuid": "${OUT_UUID}",
+      "server_port": ${OUT_NODE_PORT:-443},
+      "uuid": "${OUT_UUID:-11111111-1111-1111-1111-111111111111}",
       "domain_resolver": {
         "server": "cf",
         "strategy": "$dnsstrategy"
       },
       "tls": {
         "enabled": true,
-        "server_name": "${OUT_REALITY_SERVER_NAME}",
+        "server_name": "${OUT_REALITY_SERVER_NAME:-www.apple.com}",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        },
         "reality": {
           "enabled": true,
           "public_key": "${OUT_REALITY_PUBLIC_KEY}",
@@ -539,7 +543,7 @@ EOF
         "outbound": "block"
       },
       {
-        "outbound": "trans-to",
+        "outbound": "to-b",
         "network": [
           "udp","tcp"
         ]

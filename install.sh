@@ -416,11 +416,11 @@ else
 fi
 
 if [[ "${NODE_INOUT_TYPE}" == "in" ]]; then
-    if [[ -n "${NODE_OUT_SERVER}" ]]; then
-        echo -e "${green}使用环境变量NODE_OUT_SERVER：${NODE_OUT_SERVER}${plain}"
+    if [[ -n "${OUT_NODE_SERVER}" ]]; then
+        echo -e "${green}使用环境变量OUT_NODE_SERVER：${OUT_NODE_SERVER}${plain}"
     else
-        read -rp "请输入出口节点地址（NODE_OUT_SERVER）：" NODE_OUT_SERVER
-        export NODE_OUT_SERVER
+        read -rp "请输入出口节点地址（OUT_NODE_SERVER）：" OUT_NODE_SERVER
+        export OUT_NODE_SERVER
     fi
 fi
 
