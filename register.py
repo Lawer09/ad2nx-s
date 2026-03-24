@@ -363,6 +363,81 @@ def _get_node_reality_server_name(node: Dict[str, Any]) -> Optional[str]:
     s = str(v).strip()
     return s if s else None
 
+def get_ip_country_code(target_ip: str = None) -> str:
+    """
+    获取IP所属国家的英文两位缩写（ISO 3166-1 alpha-2，如中国=CN、美国=US）
+    :param target_ip: 可选，指定查询IP；不传则查本机公网IP
+    :return: 国家缩写/错误提示字符串
+    """
+    TIMEOUT = 5
+    # params 单独传参，自动编码，更规范
+    API_PARAMS = {"fields": "countryCode", "lang": "en"}
+
+    # 步骤1：获取本机公网IP
+    if not target_ip:
+        try:
+            target_ip = requests.get("http://ip.sb", timeout=TIMEOUT).text.strip()
+        except requests.exceptions.RequestException:
+            return "失败：获取本机IP超时/网络异常"
+
+    # 步骤2：IPv4格式校验
+    if target_ip and len(target_ip.split(".")) == 4:
+        for part in target_ip.split("."):
+            if not part.isdigit() or not 0 <= int(part) <= 255:
+                return "失败：IP格式无效（仅支持IPv4）"
+    else:
+        return "失败：IP格式无效（仅支持IPv4）"
+
+    # 步骤3：查询国家缩写
+    try:
+        resp = requests.get(
+            url=f"http://ip-api.com/json/{target_ip}",
+            params=API_PARAMS,
+            timeout=TIMEOUT
+        )
+        resp.raise_for_status()  # 主动抛出HTTP错误（如404/500）
+        return resp.json().get("countryCode", "未知")
+    except requests.exceptions.ConnectTimeout:
+        return "失败：IP查询接口连接超时"
+    except requests.exceptions.HTTPError as e:
+        return f"失败：接口返回错误({e.response.status_code})"
+    except requests.exceptions.RequestException:
+        return "失败：接口请求异常"
+
+
+def generate_available_port(start: int = 1024, end: int = 65535, max_attempts: int = 200) -> int:
+    """
+    生成本机未被占用的随机端口（TCP）
+    :param start: 端口起始值
+    :param end: 端口结束值
+    :param max_attempts: 最大尝试次数（避免无限循环）
+    :return: 可用端口号（int）
+    :raise: RuntimeError - 多次尝试后未找到可用端口
+    """
+    # 基础范围校验
+    if start < 1 or end > 65535 or start > end:
+        raise ValueError("端口范围必须满足：1 ≤ start ≤ end ≤ 65535")
+    
+    import random
+    import socket
+
+    attempts = 0
+    while attempts < max_attempts:
+        # 生成随机端口
+        port = random.randint(start, end)
+        # 检查端口是否被占用（创建socket并尝试绑定）
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                # 绑定 0.0.0.0:port，若绑定成功则端口未被占用
+                s.bind(("", port))
+                return port
+            except OSError:
+                # 端口被占用，继续尝试
+                attempts += 1
+                continue
+    
+    # 多次尝试失败，抛出异常
+    raise RuntimeError(f"在 {start}-{end} 范围内尝试 {max_attempts} 次后，未找到可用端口")
 
 def main():
     print("=== 节点注册 ===\n")
@@ -403,10 +478,10 @@ def main():
             matched_node = node
             break
 
-    default_node_name = None
-    default_port = None
-    default_server_port = None
-    default_server_name = None
+    default_node_name = get_ip_country_code()
+    default_port = generate_available_port()
+    default_server_port = default_port
+    default_server_name = "www.apple.com"
     if matched_node:
         default_node_name = _get_node_field_as_str(matched_node, "name")
         default_port = _get_node_field_as_str(matched_node, "port")
