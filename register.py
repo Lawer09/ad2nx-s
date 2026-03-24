@@ -112,13 +112,14 @@ def generate_keys() -> Tuple[str, str]:
         encoding=Encoding.Raw,
         format=PublicFormat.Raw
     )
-    return (base64.b64encode(priv_bytes).decode(),
-            base64.b64encode(pub_bytes).decode())
+    priv = base64.urlsafe_b64encode(priv_bytes).decode().rstrip("=")
+    pub = base64.urlsafe_b64encode(pub_bytes).decode().rstrip("=")
+    return (priv, pub)
 
 
 def generate_shortid() -> str:
     """生成 8 位十六进制 shortid"""
-    return secrets.token_hex(4)
+    return secrets.token_hex(8)
 
 
 def login(base_url: str, email: str, password: str) -> Optional[str]:
