@@ -546,7 +546,7 @@ def main():
             "tags": [],
             "excludes": [],
             "ips": [],
-            "group_ids": [],
+            "group_ids": ["2"],
             "host": host,
             "port": port,
             "server_port": server_port,
