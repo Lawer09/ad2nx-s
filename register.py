@@ -339,6 +339,10 @@ def _prompt_or_env_or_default(prompt: str, env_keys: List[str], default_value: O
     if value is not None:
         print(f"使用环境变量{key}: {value}")
         return value
+    if default_value is not None:
+        select = os.environ.get("SELECT", "").strip()
+        if select != "1":
+            return default_value
     return _prompt_with_default(prompt, default_value)
 
 
