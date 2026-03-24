@@ -76,23 +76,23 @@ def select_ip() -> str:
     print("1) 内网IP")
     print("2) 公网IP")
     print("3) 手动输入")
-    env_choice = os.environ.get("IP_CHOICE", "2").strip()
-    if not env_choice:
-        env_choice = os.environ.get("IP_TYPE", "").strip().lower()
-        if env_choice in ("1", "local", "lan", "intranet"):
-            env_choice = "1"
-        elif env_choice in ("2", "public", "wan"):
-            env_choice = "2"
-        elif env_choice in ("3", "manual"):
-            env_choice = "3"
-        else:
-            env_choice = ""
-
-    if env_choice in ("1", "2", "3"):
-        choice = env_choice
-        print(f"使用环境变量IP_CHOICE/IP_TYPE选择: {choice}")
+    env_choice_raw = os.environ.get("IP_CHOICE", "").strip()
+    if env_choice_raw in ("1", "2", "3"):
+        choice = env_choice_raw
+        print(f"使用环境变量IP_CHOICE选择: {choice}")
     else:
-        choice = input("请输入选项 (1/2/3) [默认2]: ").strip() or "2"
+        ip_type = os.environ.get("IP_TYPE", "").strip().lower()
+        if ip_type in ("1", "local", "lan", "intranet"):
+            choice = "1"
+            print("使用环境变量IP_TYPE选择: 1")
+        elif ip_type in ("2", "public", "wan"):
+            choice = "2"
+            print("使用环境变量IP_TYPE选择: 2")
+        elif ip_type in ("3", "manual"):
+            choice = "3"
+            print("使用环境变量IP_TYPE选择: 3")
+        else:
+            choice = input("请输入选项 (1/2/3) [默认2]: ").strip() or "2"
     if choice == '1':
         ip = get_local_ip()
         if ip:

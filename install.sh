@@ -340,10 +340,6 @@ EOF
     fi
     github_contents_download "ad2nx.sh" "/usr/bin/ad2nx"
     chmod +x /usr/bin/ad2nx
-    if [ ! -L /usr/bin/ad2nx ]; then
-        ln -s /usr/bin/ad2nx /usr/bin/ad2nx
-        chmod +x /usr/bin/ad2nx
-    fi
     cd $cur_dir
     rm -f install.sh
     echo -e ""
@@ -367,20 +363,19 @@ EOF
     echo "------------------------------------------"
     # 首次安装询问是否生成配置文件
     if [[ $first_install == true ]]; then
-
-        if [ -n "${IF_GENERATE:-y}" ]; then
-            if_generate="$IF_GENERATE"
+        if_generate="${IF_GENERATE:-y}"
+        if [[ -n "${IF_GENERATE:-}" ]]; then
             echo -e "${green}使用环境变量IF_GENERATE：${if_generate}${plain}"
         else
-            read -rp "检测到你为第一次安装ad2nx,是否自动直接生成配置文件？(y/n): " if_generate
+            echo -e "${green}使用默认IF_GENERATE：${if_generate}${plain}"
         fi
         if [[ $if_generate == [Yy] ]]; then
             echo -e "${green}已选择：${if_generate}${plain}"
-            if [ -n "${IF_REGISTER:-y}" ]; then
-                if_register="$IF_REGISTER"
+            if_register="${IF_REGISTER:-y}"
+            if [[ -n "${IF_REGISTER:-}" ]]; then
                 echo -e "${green}使用环境变量IF_REGISTER：${if_register}${plain}"
             else
-                read -rp "是否自动注册节点（执行 register.py）？(y/n): " if_register
+                echo -e "${green}使用默认IF_REGISTER：${if_register}${plain}"
             fi
             if [[ $if_register == [Yy] ]]; then
                 echo -e "${green}已选择：${if_register}${plain}"
@@ -413,19 +408,9 @@ EOF
 if [[ -n "${NODE_INOUT_TYPE:-}" ]]; then
     echo -e "${green}使用环境变量NODE_INOUT_TYPE：${NODE_INOUT_TYPE}${plain}"
 else
-    echo -e "${green}请选择节点类型：${plain}"
-    echo -e "${green}1. 出口节点（out）${plain}"
-    echo -e "${green}2. 入口节点（in）${plain}"
-    echo -e "${green}3. 独立节点（stand）${plain}"
-    read -rp "请输入：" inout_choice
-    case "$inout_choice" in
-        1 ) NODE_INOUT_TYPE="out" ;;
-        2 ) NODE_INOUT_TYPE="in" ;;
-        3 ) NODE_INOUT_TYPE="stand" ;;
-        * ) NODE_INOUT_TYPE="stand" ;;
-    esac
+    NODE_INOUT_TYPE="stand"
     export NODE_INOUT_TYPE
-    echo -e "${green}已选择：${NODE_INOUT_TYPE}${plain}"
+    echo -e "${green}使用默认NODE_INOUT_TYPE：${NODE_INOUT_TYPE}${plain}"
 fi
 
 if [[ "${NODE_INOUT_TYPE}" == "in" ]]; then
