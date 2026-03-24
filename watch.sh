@@ -16,6 +16,7 @@ DATA_DIR="/data/prometheus"
 ETC_DIR="/etc/prometheus"
 FILE_SD_DIR="${ETC_DIR}/file_sd"
 NODE_TARGETS_FILE="${FILE_SD_DIR}/node_exporter.json"
+PROCESS_TARGETS_FILE="${FILE_SD_DIR}/process_exporter.json"
 
 PROM_BIN_LINK="/usr/local/bin/prometheus"
 PROMTOOL_LINK="/usr/local/bin/promtool"
@@ -86,6 +87,81 @@ init_node_targets_file() {
 JSON
   fi
 }
+init_process_targets_file() {
+  mkdir -p "${FILE_SD_DIR}"
+  if [[ ! -f "${PROCESS_TARGETS_FILE}" ]]; then
+    cat > "${PROCESS_TARGETS_FILE}" <<'JSON'
+[
+  {
+    "labels": {
+      "job": "process_exporter"
+    },
+    "targets": []
+  }
+]
+JSON
+  fi
+}
+
+normalize_process_targets_file() {
+  check_python3
+  init_process_targets_file
+  python3 - <<PY
+import json
+from pathlib import Path
+f = Path("${PROCESS_TARGETS_FILE}")
+data = json.loads(f.read_text(encoding="utf-8"))
+if not data:
+    data = [{"labels": {"job": "process_exporter"}, "targets": []}]
+targets = data[0].setdefault("targets", [])
+seen = set()
+normalized = []
+for t in targets:
+    nt = str(t).strip().replace("：", ":").replace(" ", "")
+    if nt and nt not in seen:
+        seen.add(nt)
+        normalized.append(nt)
+normalized.sort()
+data[0]["targets"] = normalized
+f.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+PY
+}
+
+set_process_exporter_prom_target() {
+  check_python3
+  init_process_targets_file
+  local target="${1:-127.0.0.1:9256}"
+  target="$(normalize_target "$target")"
+  python3 - <<PY
+import json
+f = "${PROCESS_TARGETS_FILE}"
+target = "${target}"
+with open(f, "r", encoding="utf-8") as fp:
+    data = json.load(fp)
+if not data:
+    data = [{"labels": {"job": "process_exporter"}, "targets": []}]
+data[0]["targets"] = [target] if target else []
+with open(f, "w", encoding="utf-8") as fp:
+    json.dump(data, fp, indent=2, ensure_ascii=False)
+print(f"process-exporter Prometheus 抓取目标已设置为: {target}")
+PY
+}
+
+clear_process_exporter_prom_target() {
+  check_python3
+  init_process_targets_file
+  cat > "${PROCESS_TARGETS_FILE}" <<'JSON'
+[
+  {
+    "labels": {
+      "job": "process_exporter"
+    },
+    "targets": []
+  }
+]
+JSON
+  echo "已移除 process-exporter Prometheus 抓取目标。"
+}
 
 normalize_node_targets_file() {
   check_python3
@@ -130,10 +206,15 @@ scrape_configs:
         refresh_interval: 30s
 
   - job_name: "process_exporter"
-    static_configs: []
+    file_sd_configs:
+      - files:
+          - "${PROCESS_TARGETS_FILE}"
+        refresh_interval: 30s
 EOF2
   init_node_targets_file
   normalize_node_targets_file
+  init_process_targets_file
+  normalize_process_targets_file
 }
 
 reload_prometheus() {
@@ -177,6 +258,11 @@ install_prometheus() {
   ln -sfn "${INSTALL_BASE}/${PROM_PKG_NAME}/promtool" "${PROMTOOL_LINK}"
 
   write_prometheus_config
+  if systemctl list-unit-files | grep -q '^process-exporter.service'; then
+    if systemctl is-enabled process-exporter >/dev/null 2>&1 || systemctl is-active --quiet process-exporter; then
+      set_process_exporter_prom_target "127.0.0.1:9256"
+    fi
+  fi
 
   cat > "${PROM_SERVICE_FILE}" <<'SERVICE'
 [Unit]
@@ -466,7 +552,15 @@ WantedBy=multi-user.target
 EOF2
   systemctl daemon-reload
   systemctl enable --now process-exporter
+  if [[ -x "${PROM_BIN_LINK}" ]]; then
+    set_process_exporter_prom_target "127.0.0.1:9256"
+    "${PROMTOOL_LINK}" check config "${ETC_DIR}/prometheus.yml"
+    reload_prometheus
+  fi
   echo "process-exporter 安装完成。"
+  if [[ -x "${PROM_BIN_LINK}" ]]; then
+    echo "已自动加入 Prometheus 抓取配置: 127.0.0.1:9256"
+  fi
 }
 
 uninstall_process_exporter() {
@@ -482,6 +576,14 @@ uninstall_process_exporter() {
     echo "已删除配置目录: ${PROCESS_EXPORTER_CONF_DIR}"
   else
     echo "保留配置目录: ${PROCESS_EXPORTER_CONF_DIR}"
+  fi
+  if [[ -x "${PROM_BIN_LINK}" ]]; then
+    read -rp "是否同时从 Prometheus 抓取配置中移除 process-exporter 目标? [Y/n]: " remove_prom_target
+    if [[ ! "${remove_prom_target:-Y}" =~ ^[Nn]$ ]]; then
+      clear_process_exporter_prom_target
+      "${PROMTOOL_LINK}" check config "${ETC_DIR}/prometheus.yml"
+      reload_prometheus
+    fi
   fi
 }
 
@@ -513,6 +615,13 @@ process_exporter_status() {
   echo
   echo "===== 监听端口 ====="
   ss -lntp | grep ':9256' || echo "未检测到 9256 监听"
+  echo
+  echo "===== Prometheus 抓取目标 ====="
+  if [[ -f "${PROCESS_TARGETS_FILE}" ]]; then
+    cat "${PROCESS_TARGETS_FILE}"
+  else
+    echo "Prometheus 抓取目标文件不存在"
+  fi
   echo
   echo "===== 本地指标抽样 ====="
   if command -v curl >/dev/null 2>&1; then
@@ -555,6 +664,7 @@ manage_process_exporter_menu() {
     echo "2. 卸载 process-exporter"
     echo "3. 配置进程名（默认 ad2nx）"
     echo "4. process-exporter 状态"
+    echo "5. 手动设置 Prometheus 抓取目标"
     echo "0. 返回上级菜单"
     echo "=============================="
     read -rp "请选择: " sub_choice
@@ -563,6 +673,7 @@ manage_process_exporter_menu() {
       2) uninstall_process_exporter ;;
       3) configure_process_exporter_name ;;
       4) process_exporter_status ;;
+      5) need_root; check_prometheus_installed || break; read -rp "请输入 process-exporter Prometheus 抓取目标 [默认 127.0.0.1:9256]: " pe_target; pe_target="${pe_target:-127.0.0.1:9256}"; set_process_exporter_prom_target "$pe_target"; "${PROMTOOL_LINK}" check config "${ETC_DIR}/prometheus.yml"; reload_prometheus ;;
       0) break ;;
       *) echo "无效选项，请重新输入。" ;;
     esac
