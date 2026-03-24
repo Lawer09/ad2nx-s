@@ -23,7 +23,14 @@ add_node_config() {
     echo -e "${green}1. xray${plain}"
     echo -e "${green}2. singbox${plain}"
     echo -e "${green}3. hysteria2${plain}"
-    read -rp "请输入：" core_type
+    if [ -n "${CORE_TYPE:-}" ]; then
+        core_type="$CORE_TYPE"
+        echo -e "${green}使用环境变量CORE_TYPE：${core_type}${plain}"
+    elif [ -n "${core_type:-}" ]; then
+        echo -e "${green}使用环境变量core_type：${core_type}${plain}"
+    else
+        read -rp "请输入：" core_type
+    fi
     if [ "$core_type" == "1" ]; then
         core="xray"
         core_xray=true
@@ -35,7 +42,20 @@ add_node_config() {
         core_hysteria2=true
     else
         echo "无效的选择。请选择 1 2 3。"
-        continue
+        read -rp "请输入：" core_type
+        if [ "$core_type" == "1" ]; then
+            core="xray"
+            core_xray=true
+        elif [ "$core_type" == "2" ]; then
+            core="sing"
+            core_sing=true
+        elif [ "$core_type" == "3" ]; then
+            core="hysteria2"
+            core_hysteria2=true
+        else
+            echo "无效的选择。请选择 1 2 3。"
+            continue
+        fi
     fi
 
     if [ "$core_type" == "2" ] && [ "$NODE_INOUT_TYPE" == "in" ]; then
@@ -252,7 +272,14 @@ generate_config_file() {
     echo -e "${red}3. 原来的配置文件会保存到 /etc/ad2nx/config.json.bak${plain}"
     echo -e "${red}4. 目前仅部分支持TLS${plain}"
     echo -e "${red}5. 使用此功能生成的配置文件会自带审计，确定继续？(y/n)${plain}"
-    read -rp "请输入：" continue_prompt
+    if [ -n "${CONTINUE_PROMPT:-y}" ]; then
+        continue_prompt="$CONTINUE_PROMPT"
+        echo -e "${green}使用环境变量CONTINUE_PROMPT：${continue_prompt}${plain}"
+    elif [ -n "${continue_prompt:-}" ]; then
+        echo -e "${green}使用环境变量continue_prompt：${continue_prompt}${plain}"
+    else
+        read -rp "请输入：" continue_prompt
+    fi
     if [[ "$continue_prompt" =~ ^[Nn][Oo]? ]]; then
         exit 0
     fi
@@ -281,7 +308,12 @@ generate_config_file() {
             else
                 read -rp "请输入面板对接API Key：" ApiKey
             fi
-            read -rp "是否设置固定的机场网址和API Key？(y/n)" fixed_api
+            if [ -n "${FIXED_API:-y}" ]; then
+                fixed_api="$FIXED_API"
+                echo -e "${green}使用环境变量FIXED_API：${fixed_api}${plain}"
+            else
+                read -rp "是否设置固定的机场网址和API Key？(y/n)" fixed_api
+            fi
             if [ "$fixed_api" = "y" ] || [ "$fixed_api" = "Y" ]; then
                 fixed_api_info=true
                 echo -e "${red}成功固定地址${plain}"
@@ -289,7 +321,14 @@ generate_config_file() {
             first_node=false
             add_node_config
         else
-            read -rp "是否继续添加节点配置？(回车继续，输入n或no退出)" continue_adding_node
+            if [ -n "${CONTINUE_ADDING_NODE:-n}" ]; then
+                continue_adding_node="$CONTINUE_ADDING_NODE"
+                echo -e "${green}使用环境变量CONTINUE_ADDING_NODE：${continue_adding_node}${plain}"
+            elif [ -n "${continue_adding_node:-}" ]; then
+                echo -e "${green}使用环境变量continue_adding_node：${continue_adding_node}${plain}"
+            else
+                read -rp "是否继续添加节点配置？(回车继续，输入n或no退出)" continue_adding_node
+            fi
             if [[ "$continue_adding_node" =~ ^[Nn][Oo]? ]]; then
                 break
             elif [ "$fixed_api_info" = false ]; then
