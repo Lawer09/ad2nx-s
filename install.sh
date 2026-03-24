@@ -367,10 +367,23 @@ EOF
     echo "------------------------------------------"
     # 首次安装询问是否生成配置文件
     if [[ $first_install == true ]]; then
-        read -rp "检测到你为第一次安装ad2nx,是否自动直接生成配置文件？(y/n): " if_generate
+
+        if [ -n "${IF_GENERATE:-y}" ]; then
+            if_generate="$IF_GENERATE"
+            echo -e "${green}使用环境变量IF_GENERATE：${if_generate}${plain}"
+        else
+            read -rp "检测到你为第一次安装ad2nx,是否自动直接生成配置文件？(y/n): " if_generate
+        fi
         if [[ $if_generate == [Yy] ]]; then
-            read -rp "是否自动注册节点（执行 register.py）？(y/n): " if_register
+            echo -e "${green}已选择：${if_generate}${plain}"
+            if [ -n "${IF_REGISTER:-y}" ]; then
+                if_register="$IF_REGISTER"
+                echo -e "${green}使用环境变量IF_REGISTER：${if_register}${plain}"
+            else
+                read -rp "是否自动注册节点（执行 register.py）？(y/n): " if_register
+            fi
             if [[ $if_register == [Yy] ]]; then
+                echo -e "${green}已选择：${if_register}${plain}"
                 github_contents_download "register.py" "./register.py"
                 chmod +x ./register.py
                 if command -v python3 >/dev/null 2>&1; then
@@ -397,7 +410,7 @@ EOF
     fi
 }
 
-if [[ -n "${NODE_INOUT_TYPE}" ]]; then
+if [[ -n "${NODE_INOUT_TYPE:-}" ]]; then
     echo -e "${green}使用环境变量NODE_INOUT_TYPE：${NODE_INOUT_TYPE}${plain}"
 else
     echo -e "${green}请选择节点类型：${plain}"

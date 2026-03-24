@@ -275,8 +275,6 @@ generate_config_file() {
     if [ -n "${CONTINUE_PROMPT:-y}" ]; then
         continue_prompt="$CONTINUE_PROMPT"
         echo -e "${green}使用环境变量CONTINUE_PROMPT：${continue_prompt}${plain}"
-    elif [ -n "${continue_prompt:-}" ]; then
-        echo -e "${green}使用环境变量continue_prompt：${continue_prompt}${plain}"
     else
         read -rp "请输入：" continue_prompt
     fi
