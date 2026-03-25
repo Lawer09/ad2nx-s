@@ -15,7 +15,7 @@ SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 GITHUB_OWNER="Lawer09"
 GITHUB_REPO="adnx-dns"
 GITHUB_TAG="1.0.0"
-ASSET_NAME="adnx_dns_1.0.0_linux_amd64.tar.gz"
+ASSET_NAME="adnx_dns_v1.0.0_linux_amd64.tar.gz"
 TMP_DIR="/tmp/${APP_NAME}_install"
 
 DB_NAME="adnx_dns"
