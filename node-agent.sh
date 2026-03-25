@@ -299,6 +299,7 @@ configure_subscription() {
     exit 1
   fi
 
+  export SUB_URL
   yq -i '
     .subscription.enabled = true |
     .subscription.url = strenv(SUB_URL) |
@@ -311,7 +312,6 @@ configure_subscription() {
   green "订阅链接已更新"
   systemctl restart "${APP_NAME}" || true
 }
-
 configure_probe_meta() {
   check_root
   ensure_config_exists
@@ -325,6 +325,7 @@ configure_probe_meta() {
   read -rp "probe_agent.env [prod/test]: " PA_ENV
   read -rp "probe_agent.cluster: " PA_CLUSTER
 
+  export PA_NAME PA_REGION PA_COUNTRY PA_CITY PA_PROVIDER PA_ASN PA_ENV PA_CLUSTER
   yq -i '
     .probe_agent.name = strenv(PA_NAME) |
     .probe_agent.region = strenv(PA_REGION) |
@@ -357,6 +358,7 @@ configure_probe_mode() {
     *) red "无效选项"; exit 1 ;;
   esac
 
+  export MODE
   yq -i '
     .default_probe.interval_seconds = (.default_probe.interval_seconds // 60) |
     .default_probe.timeout_seconds = (.default_probe.timeout_seconds // 8) |
@@ -380,6 +382,7 @@ configure_business_url() {
     exit 1
   fi
 
+  export BIZ_URL
   yq -i '
     .default_probe.interval_seconds = (.default_probe.interval_seconds // 60) |
     .default_probe.timeout_seconds = (.default_probe.timeout_seconds // 8) |
