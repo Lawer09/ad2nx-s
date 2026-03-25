@@ -4,6 +4,10 @@ set -euo pipefail
 PROM_VERSION="${PROM_VERSION:-2.55.1}"
 ARCH="${ARCH:-linux-amd64}"
 
+PROM_BIN_LINK="/usr/local/bin/prometheus"
+PROMTOOL_LINK="/usr/local/bin/promtool"
+PROM_SERVICE_FILE="/etc/systemd/system/prometheus.service"
+
 INSTALL_DIR="/opt/prometheus"
 ETC_DIR="/etc/prometheus"
 DATA_DIR="/var/lib/prometheus"
@@ -27,122 +31,196 @@ need_root() {
   fi
 }
 
-ensure_jq() {
-  if ! command -v jq >/dev/null 2>&1; then
-    apt update -y
-    apt install -y jq
+check_python3() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "未检测到 python3，请先安装 python3。"
+    exit 1
   fi
 }
 
+normalize_target() {
+  local raw="${1:-}"
+  printf '%s' "$raw" | sed 's/[[:space:]]//g; s/：/:/g'
+}
+
+check_prometheus_installed() {
+  if [[ ! -x "${PROM_BIN_LINK}" ]]; then
+    echo "Prometheus 未安装。"
+    return 1
+  fi
+  return 0
+}
+
 init_targets_file() {
-  local file="$1"
-  local job="$2"
+  local file_path="$1"
+  local job_name="$2"
   mkdir -p "${FILE_SD_DIR}"
-  if [[ ! -f "${file}" ]]; then
-    printf '[{"labels":{"job":"%s"},"targets":[]}]' "${job}" > "${file}"
+  if [[ ! -f "$file_path" ]]; then
+    cat > "$file_path" <<JSON
+[
+  {
+    "labels": {
+      "job": "$job_name"
+    },
+    "targets": []
+  }
+]
+JSON
   fi
 }
 
 normalize_targets_file() {
-  local file="$1"
-  local job="$2"
-  mkdir -p "${FILE_SD_DIR}"
-
-  if [[ ! -f "${file}" ]]; then
-    init_targets_file "${file}" "${job}"
-    return
-  fi
-
-  local tmp
-  tmp="$(mktemp)"
-  jq --arg job "${job}" '
-    if type != "array" or length == 0 then
-      [{"labels":{"job":$job},"targets":[]}]
-    else
-      [.[0] | {
-        labels: (.labels // {job:$job}) + {job:$job},
-        targets: ((.targets // []) | map(select(type=="string")) | map(gsub("^\\s+|\\s+$"; "")) | map(select(length>0)) | unique)
-      }]
-    end
-  ' "${file}" > "${tmp}" && mv "${tmp}" "${file}"
+  check_python3
+  local file_path="$1"
+  local job_name="$2"
+  init_targets_file "$file_path" "$job_name"
+  python3 - <<PY
+import json
+from pathlib import Path
+f = Path(${file_path@Q})
+job_name = ${job_name@Q}
+data = json.loads(f.read_text(encoding='utf-8'))
+if not data or not isinstance(data, list):
+    data = [{"labels": {"job": job_name}, "targets": []}]
+entry = data[0]
+entry.setdefault('labels', {}).setdefault('job', job_name)
+targets = entry.setdefault('targets', [])
+seen = set()
+normalized = []
+for t in targets:
+    nt = str(t).strip().replace('：', ':').replace(' ', '')
+    if nt and nt not in seen:
+        seen.add(nt)
+        normalized.append(nt)
+normalized.sort()
+entry['targets'] = normalized
+f.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding='utf-8')
+PY
 }
 
 list_targets() {
-  local file="$1"
-  local job="$2"
+  check_python3
+  local file_path="$1"
+  local job_name="$2"
   local title="$3"
-
-  normalize_targets_file "${file}" "${job}"
-
-  local count
-  count="$(jq '.[0].targets | length' "${file}")"
-
+  normalize_targets_file "$file_path" "$job_name"
   echo
-  echo "${title}"
-  if [[ "${count}" -eq 0 ]]; then
-    echo "  （空）"
-    return
-  fi
-
-  jq -r '.[0].targets[]' "${file}" | nl -w2 -s'. '
+  echo "$title"
+  python3 - <<PY
+import json
+f = ${file_path@Q}
+with open(f, 'r', encoding='utf-8') as fp:
+    data = json.load(fp)
+targets = []
+for item in data:
+    targets.extend(item.get('targets', []))
+if not targets:
+    print('  (空)')
+else:
+    for i, t in enumerate(targets, 1):
+        print(f'  {i}. {t}')
+PY
+  echo
 }
 
 add_target() {
-  local file="$1"
-  local job="$2"
+  need_root
+  check_python3
+  check_prometheus_installed || return 1
+  local file_path="$1"
+  local job_name="$2"
   local prompt="$3"
-
-  normalize_targets_file "${file}" "${job}"
-  read -rp "${prompt}" target
-  target="$(echo "${target}" | xargs)"
-
-  if [[ -z "${target}" ]]; then
-    echo "目标地址不能为空。"
-    return
+  normalize_targets_file "$file_path" "$job_name"
+  read -rp "$prompt" target
+  target="$(normalize_target "$target")"
+  if [[ -z "$target" ]]; then
+    echo "目标不能为空。"
+    return 1
   fi
-
-  local tmp
-  tmp="$(mktemp)"
-  jq --arg t "${target}" '
-    .[0].targets |= ((. + [$t]) | unique)
-  ' "${file}" > "${tmp}" && mv "${tmp}" "${file}"
-
-  echo "已添加目标: ${target}"
+  python3 - <<PY
+import json, sys
+f = ${file_path@Q}
+job_name = ${job_name@Q}
+target = ${target@Q}
+with open(f, 'r', encoding='utf-8') as fp:
+    data = json.load(fp)
+if not data:
+    data = [{"labels": {"job": job_name}, "targets": []}]
+entry = data[0]
+entry.setdefault('labels', {}).setdefault('job', job_name)
+targets = entry.setdefault('targets', [])
+normalized = []
+seen = set()
+for t in targets:
+    nt = str(t).strip().replace('：', ':').replace(' ', '')
+    if nt and nt not in seen:
+        seen.add(nt)
+        normalized.append(nt)
+if target in seen:
+    entry['targets'] = sorted(normalized)
+    with open(f, 'w', encoding='utf-8') as fp:
+        json.dump(data, fp, indent=2, ensure_ascii=False)
+    print('节点已存在，无需重复添加。')
+    sys.exit(0)
+normalized.append(target)
+entry['targets'] = sorted(normalized)
+with open(f, 'w', encoding='utf-8') as fp:
+    json.dump(data, fp, indent=2, ensure_ascii=False)
+print(f'已添加节点: {target}')
+PY
+  "${PROMTOOL_LINK}" check config "${ETC_DIR}/prometheus.yml"
+  reload_prometheus
 }
 
 delete_target() {
-  local file="$1"
-  local job="$2"
+  need_root
+  check_python3
+  check_prometheus_installed || return 1
+  local file_path="$1"
+  local job_name="$2"
   local title="$3"
-
-  normalize_targets_file "${file}" "${job}"
-  local count
-  count="$(jq '.[0].targets | length' "${file}")"
-
-  if [[ "${count}" -eq 0 ]]; then
-    echo "当前没有可删除的目标。"
-    return
+  normalize_targets_file "$file_path" "$job_name"
+  list_targets "$file_path" "$job_name" "$title"
+  read -rp "请输入要删除的序号或目标地址（例如 2 或 10.0.0.11:9100）: " target_input
+  target_input="$(normalize_target "$target_input")"
+  if [[ -z "$target_input" ]]; then
+    echo "输入不能为空。"
+    return 1
   fi
-
-  list_targets "${file}" "${job}" "${title}"
-  read -rp "请输入要删除的序号: " idx
-
-  if ! [[ "${idx}" =~ ^[0-9]+$ ]]; then
-    echo "请输入有效数字。"
-    return
-  fi
-  if (( idx < 1 || idx > count )); then
-    echo "序号超出范围。"
-    return
-  fi
-
-  local tmp
-  tmp="$(mktemp)"
-  jq --argjson idx "$((idx-1))" '
-    .[0].targets |= [ to_entries[] | select(.key != $idx) | .value ]
-  ' "${file}" > "${tmp}" && mv "${tmp}" "${file}"
-
-  echo "已删除序号 ${idx} 的目标。"
+  python3 - <<PY
+import json, sys
+f = ${file_path@Q}
+user_input = ${target_input@Q}
+with open(f, 'r', encoding='utf-8') as fp:
+    data = json.load(fp)
+if not data:
+    print('目标文件为空。')
+    sys.exit(1)
+entry = data[0]
+targets = [str(t).strip().replace('：', ':').replace(' ', '') for t in entry.setdefault('targets', [])]
+targets = sorted(dict.fromkeys([t for t in targets if t]))
+if not targets:
+    print('当前没有可删除的节点。')
+    sys.exit(1)
+if user_input.isdigit():
+    idx = int(user_input)
+    if idx < 1 or idx > len(targets):
+        print(f'序号超出范围，当前有效范围: 1-{len(targets)}')
+        sys.exit(1)
+    deleted = targets.pop(idx - 1)
+else:
+    if user_input not in targets:
+        print('未找到该节点。你可以输入序号，或输入完整地址。')
+        sys.exit(1)
+    targets.remove(user_input)
+    deleted = user_input
+entry['targets'] = targets
+with open(f, 'w', encoding='utf-8') as fp:
+    json.dump(data, fp, indent=2, ensure_ascii=False)
+print(f'已删除节点: {deleted}')
+PY
+  "${PROMTOOL_LINK}" check config "${ETC_DIR}/prometheus.yml"
+  reload_prometheus
 }
 
 list_node_targets() { list_targets "${NODE_TARGETS_FILE}" "node_exporter" "当前 node_exporter 监测节点："; }
@@ -200,43 +278,56 @@ EOF
 
 install_prometheus() {
   need_root
-  ensure_jq
-
-  mkdir -p "${INSTALL_DIR}" "${ETC_DIR}" "${DATA_DIR}" "${FILE_SD_DIR}"
-
+  check_python3
+  echo "开始安装 Prometheus..."
+  if ! getent group "${PROM_GROUP}" >/dev/null; then
+    groupadd --system "${PROM_GROUP}"
+  fi
+  if ! id -u "${PROM_USER}" >/dev/null 2>&1; then
+    useradd --system --no-create-home --shell /usr/sbin/nologin -g "${PROM_GROUP}" "${PROM_USER}"
+  fi
+  mkdir -p "${INSTALL_BASE}" "${DATA_DIR}" "${ETC_DIR}" "${FILE_SD_DIR}"
+  chown -R "${PROM_USER}:${PROM_GROUP}" "${DATA_DIR}" "${ETC_DIR}"
   cd /tmp
-  rm -rf "${PKG_NAME}" "${PKG_FILE}"
-  curl -fL -o "${PKG_FILE}" "${DOWNLOAD_URL}"
-  tar -xzf "${PKG_FILE}"
-
-  install -m 0755 "${PKG_NAME}/prometheus" "${PROM_BIN}"
-  install -m 0755 "${PKG_NAME}/promtool" "${PROMTOOL_BIN}"
-
+  rm -rf "${PROM_PKG_NAME}" "${PROM_PKG_FILE}"
+  echo "下载 ${PROM_DOWNLOAD_URL}"
+  curl -fL -o "${PROM_PKG_FILE}" "${PROM_DOWNLOAD_URL}"
+  tar -xzf "${PROM_PKG_FILE}"
+  rm -rf "${INSTALL_BASE:?}/${PROM_PKG_NAME}"
+  mv "${PROM_PKG_NAME}" "${INSTALL_BASE}/"
+  ln -sfn "${INSTALL_BASE}/${PROM_PKG_NAME}/prometheus" "${PROM_BIN_LINK}"
+  ln -sfn "${INSTALL_BASE}/${PROM_PKG_NAME}/promtool" "${PROMTOOL_LINK}"
   write_prometheus_config
-
-  cat > "${SERVICE_FILE}" <<EOF
+  cat > "${PROM_SERVICE_FILE}" <<'SERVICE'
 [Unit]
-Description=Prometheus
+Description=Prometheus Monitoring System
 After=network-online.target
 Wants=network-online.target
 
 [Service]
+User=prometheus
+Group=prometheus
 Type=simple
-ExecStart=${PROM_BIN} \
-  --config.file=${ETC_DIR}/prometheus.yml \
-  --storage.tsdb.path=${DATA_DIR} \
+ExecStart=/usr/local/bin/prometheus \
+  --config.file=/etc/prometheus/prometheus.yml \
+  --storage.tsdb.path=/data/prometheus \
   --web.listen-address=:9090 \
-  --storage.tsdb.retention.time=15d
+  --web.enable-lifecycle
 Restart=always
 RestartSec=5
+LimitNOFILE=65535
+WorkingDirectory=/data/prometheus
 
 [Install]
 WantedBy=multi-user.target
-EOF
-
+SERVICE
+  chown -R "${PROM_USER}:${PROM_GROUP}" "${DATA_DIR}" "${ETC_DIR}"
+  chown -R "${PROM_USER}:${PROM_GROUP}" "${INSTALL_BASE}/${PROM_PKG_NAME}"
+  chown -h "${PROM_USER}:${PROM_GROUP}" "${PROM_BIN_LINK}" "${PROMTOOL_LINK}" || true
+  "${PROMTOOL_LINK}" check config "${ETC_DIR}/prometheus.yml"
   systemctl daemon-reload
   systemctl enable --now prometheus
-  echo "Prometheus 安装完成。"
+  echo "Prometheus 安装完成。访问: http://127.0.0.1:9090"
 }
 
 uninstall_prometheus() {
@@ -260,12 +351,17 @@ uninstall_prometheus() {
 }
 
 reload_prometheus() {
-  need_root
-  if [[ -x "${PROMTOOL_BIN}" ]]; then
-    "${PROMTOOL_BIN}" check config "${ETC_DIR}/prometheus.yml"
+  if systemctl is-active --quiet prometheus; then
+    if curl -fsS -X POST http://127.0.0.1:9090/-/reload >/dev/null 2>&1; then
+      echo "Prometheus 已热重载。"
+    else
+      echo "热重载失败，尝试重启服务..."
+      systemctl restart prometheus
+      echo "Prometheus 已重启。"
+    fi
+  else
+    echo "Prometheus 未运行，跳过重载。"
   fi
-  systemctl reload prometheus 2>/dev/null || systemctl restart prometheus
-  echo "Prometheus 配置已重载。"
 }
 
 prometheus_status() {
