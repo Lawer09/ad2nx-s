@@ -707,7 +707,7 @@ main_menu() {
     echo "========================================"
     echo " Watch 快捷管理脚本"
     echo "========================================"
-    echo "1. Prometheus 管理"
+    echo "1. prometheus 管理"
     echo "2. node_exporter 管理"
     echo "3. process_exporter 管理"
     echo "0. 退出"
