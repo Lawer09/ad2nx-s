@@ -11,9 +11,6 @@ PROM_SERVICE_FILE="/etc/systemd/system/prometheus.service"
 INSTALL_DIR="/opt/prometheus"
 ETC_DIR="/etc/prometheus"
 DATA_DIR="/var/lib/prometheus"
-SERVICE_FILE="/etc/systemd/system/prometheus.service"
-PROM_BIN="/usr/local/bin/prometheus"
-PROMTOOL_BIN="/usr/local/bin/promtool"
 
 FILE_SD_DIR="${ETC_DIR}/file_sd"
 NODE_TARGETS_FILE="${FILE_SD_DIR}/node_exporter.json"
@@ -332,22 +329,28 @@ SERVICE
 
 uninstall_prometheus() {
   need_root
+  echo "准备卸载 Prometheus..."
   read -rp "是否同时删除数据目录 ${DATA_DIR} ? [y/N]: " remove_data
-
+  read -rp "是否同时删除配置目录 ${ETC_DIR} ? [y/N]: " remove_config
   systemctl stop prometheus >/dev/null 2>&1 || true
   systemctl disable prometheus >/dev/null 2>&1 || true
-  rm -f "${SERVICE_FILE}"
+  rm -f "${PROM_SERVICE_FILE}"
   systemctl daemon-reload
-
-  rm -f "${PROM_BIN}" "${PROMTOOL_BIN}"
-  rm -rf "${ETC_DIR}"
-
+  rm -f "${PROM_BIN_LINK}" "${PROMTOOL_LINK}"
+  rm -rf "${INSTALL_BASE}"/prometheus-* || true
   if [[ "${remove_data}" =~ ^[Yy]$ ]]; then
     rm -rf "${DATA_DIR}"
     echo "已删除数据目录: ${DATA_DIR}"
   else
     echo "保留数据目录: ${DATA_DIR}"
   fi
+  if [[ "${remove_config}" =~ ^[Yy]$ ]]; then
+    rm -rf "${ETC_DIR}"
+    echo "已删除配置目录: ${ETC_DIR}"
+  else
+    echo "保留配置目录: ${ETC_DIR}"
+  fi
+  echo "Prometheus 已卸载。"
 }
 
 reload_prometheus() {
@@ -372,18 +375,17 @@ prometheus_status() {
   else
     echo "Prometheus 未安装。"
   fi
-
-  echo
-  echo "===== 本地配置校验 ====="
-  if [[ -x "${PROMTOOL_BIN}" && -f "${ETC_DIR}/prometheus.yml" ]]; then
-    "${PROMTOOL_BIN}" check config "${ETC_DIR}/prometheus.yml" || true
-  else
-    echo "未找到 promtool 或配置文件"
-  fi
-
   echo
   echo "===== 监听端口 ====="
   ss -lntp | grep ':9090' || echo "未检测到 9090 监听"
+  echo
+  echo "===== 抓取配置文件 ====="
+  if [[ -f "${ETC_DIR}/prometheus.yml" ]]; then
+    sed -n '1,200p' "${ETC_DIR}/prometheus.yml"
+  else
+    echo "Prometheus 配置文件不存在"
+  fi
+  echo
 }
 
 manage_prometheus_node_targets_menu() {
