@@ -115,6 +115,7 @@ After=network.target
 Type=simple
 WorkingDirectory=${INSTALL_DIR}
 ExecStart=${BIN_PATH}
+Environment=CONFIG_PATH=${CONFIG_PATH}
 Restart=always
 RestartSec=3
 LimitNOFILE=1048576
