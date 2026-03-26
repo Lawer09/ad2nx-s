@@ -184,6 +184,7 @@ sync_db_config_to_env() {
   set_env_value "MYSQL_USER" "$user"
   set_env_value "MYSQL_PASSWORD" "$password"
   set_env_value "MYSQL_DB" "$dbname"
+  set_env_value "MYSQL_DSN" "${user}:${password}@tcp(${host}:${port})/${dbname}?parseTime=true&charset=utf8mb4&loc=Local"
 
   msg "数据库配置已同步到: $ENV_FILE"
 }
