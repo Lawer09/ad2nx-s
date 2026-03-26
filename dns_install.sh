@@ -11,15 +11,17 @@ ENV_FILE="$INSTALL_DIR/.env"
 SCHEMA_FILE="$INSTALL_DIR/schema.sql"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
-# 固定 GitHub Release 信息
+DB_NAME="adnx_dns"
+DB_USER_DEFAULT="adnx"
+
+# GitHub Release 配置
 GITHUB_OWNER="Lawer09"
 GITHUB_REPO="adnx-dns"
 GITHUB_TAG="1.0.0"
-ASSET_NAME="adnx_dns_v1.0.0_linux_amd64.tar.gz"
-TMP_DIR="/tmp/${APP_NAME}_install"
+ASSET_NAME="adnx_dns_linux_amd64.tar.gz"
 
-DB_NAME="adnx_dns"
-DB_USER_DEFAULT="adnx"
+TMP_DIR="/tmp/${APP_NAME}_install"
+PACKAGE_PATH_DEFAULT=""
 
 print_line() {
   echo "=================================================="
@@ -64,7 +66,7 @@ install_base_deps() {
   local pm
   pm="$(detect_pm)"
   if [[ -z "$pm" ]]; then
-    err "未识别包管理器，请手动安装: curl jq tar unzip gzip"
+    err "未识别包管理器，请手动安装: curl tar gzip unzip ca-certificates mysql-client"
     exit 1
   fi
 
@@ -72,13 +74,13 @@ install_base_deps() {
   case "$pm" in
     apt)
       apt update
-      DEBIAN_FRONTEND=noninteractive apt install -y curl jq tar gzip unzip ca-certificates
+      DEBIAN_FRONTEND=noninteractive apt install -y curl tar gzip unzip ca-certificates mysql-client nano
       ;;
     dnf)
-      dnf install -y curl jq tar gzip unzip ca-certificates
+      dnf install -y curl tar gzip unzip ca-certificates mysql nano
       ;;
     yum)
-      yum install -y curl jq tar gzip unzip ca-certificates
+      yum install -y curl tar gzip unzip ca-certificates mysql nano
       ;;
   esac
 }
@@ -91,27 +93,17 @@ install_mysql_packages() {
     exit 1
   fi
 
-  if command -v mysql >/dev/null 2>&1; then
-    msg "检测到 mysql 客户端已安装，跳过客户端安装"
-  fi
-
   msg "安装 MySQL 服务端和客户端..."
   case "$pm" in
     apt)
       apt update
       DEBIAN_FRONTEND=noninteractive apt install -y mysql-server mysql-client
-      systemctl enable mysql || true
-      systemctl restart mysql || true
       ;;
     dnf)
       dnf install -y mysql-server mysql
-      systemctl enable mysqld || true
-      systemctl restart mysqld || true
       ;;
     yum)
       yum install -y mysql-server mysql
-      systemctl enable mysqld || true
-      systemctl restart mysqld || true
       ;;
   esac
 }
@@ -132,10 +124,9 @@ ensure_mysql_running() {
   local svc
   svc="$(mysql_service_name)"
   if [[ -z "$svc" ]]; then
-    warn "未找到 mysql/mysqld systemd 服务名，请确认 MySQL 已正确安装"
+    warn "未找到 mysql/mysqld 服务，请确认 MySQL 已正确安装"
     return
   fi
-
   systemctl enable "$svc" || true
   systemctl restart "$svc" || true
   sleep 2
@@ -144,72 +135,60 @@ ensure_mysql_running() {
 ensure_dirs() {
   mkdir -p "$INSTALL_DIR"
   mkdir -p "$INSTALL_DIR/logs"
+  mkdir -p "$TMP_DIR"
 }
 
-download_from_github_release() {
-  rm -rf "$TMP_DIR"
-  mkdir -p "$TMP_DIR"
-
+download_release_package() {
   local asset_url="https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/download/${GITHUB_TAG}/${ASSET_NAME}"
   local download_path="${TMP_DIR}/${ASSET_NAME}"
 
   msg "下载 GitHub Release: $asset_url"
   curl -fL "$asset_url" -o "$download_path"
+  echo "$download_path"
+}
 
-  msg "解压安装包..."
-  cd "$TMP_DIR"
+extract_package() {
+  local pkg_path="$1"
 
-  if [[ "$ASSET_NAME" =~ \.tar\.gz$ ]]; then
-    tar -xzf "$download_path"
-  elif [[ "$ASSET_NAME" =~ \.zip$ ]]; then
-    unzip -o "$download_path"
+  rm -rf "${TMP_DIR}/extract"
+  mkdir -p "${TMP_DIR}/extract"
+  cd "${TMP_DIR}/extract"
+
+  if [[ "$pkg_path" =~ \.tar\.gz$ ]]; then
+    tar -xzf "$pkg_path"
+  elif [[ "$pkg_path" =~ \.zip$ ]]; then
+    unzip -o "$pkg_path"
   else
-    err "不支持的压缩格式: $ASSET_NAME"
+    err "不支持的压缩格式: $pkg_path"
     exit 1
   fi
 
   local release_dir
-  release_dir="$(find "$TMP_DIR" -maxdepth 1 -type d -name "${APP_NAME}_*" | head -n 1)"
+  release_dir="$(find "${TMP_DIR}/extract" -maxdepth 1 -type d -name "${APP_NAME}_*" | head -n 1)"
   if [[ -z "${release_dir:-}" ]]; then
     err "未找到解压后的目录"
     exit 1
   fi
 
-  msg "复制文件到安装目录..."
-  cp -rf "${release_dir}/"* "$INSTALL_DIR"/
+  echo "$release_dir"
 }
 
-copy_local_files() {
-  msg "使用当前目录本地文件安装..."
-  cp -f "./$BIN_NAME" "$BIN_PATH"
+copy_release_files() {
+  local release_dir="$1"
+
+  msg "复制发布文件到 $INSTALL_DIR ..."
+  cp -f "${release_dir}/${BIN_NAME}" "$BIN_PATH"
   chmod +x "$BIN_PATH"
 
-  [[ -f "./.env.example" ]] && cp -f "./.env.example" "$ENV_EXAMPLE"
-  [[ -f "./schema.sql" ]] && cp -f "./schema.sql" "$SCHEMA_FILE"
-  [[ -f "./README.md" ]] && cp -f "./README.md" "$INSTALL_DIR/README.md"
-  [[ -f "./RELEASE.md" ]] && cp -f "./RELEASE.md" "$INSTALL_DIR/RELEASE.md"
+  [[ -f "${release_dir}/.env.example" ]] && cp -f "${release_dir}/.env.example" "$ENV_EXAMPLE"
+  [[ -f "${release_dir}/schema.sql" ]] && cp -f "${release_dir}/schema.sql" "$SCHEMA_FILE"
+  [[ -f "${release_dir}/README.md" ]] && cp -f "${release_dir}/README.md" "$INSTALL_DIR/README.md"
+  [[ -f "${release_dir}/RELEASE.md" ]] && cp -f "${release_dir}/RELEASE.md" "$INSTALL_DIR/RELEASE.md"
 
-  if [[ ! -f "$ENV_FILE" && -f "$ENV_EXAMPLE" ]]; then
-    cp -f "$ENV_EXAMPLE" "$ENV_FILE"
-    msg "已生成默认配置文件: $ENV_FILE"
+  if [[ -d "${release_dir}/configs" ]]; then
+    rm -rf "$INSTALL_DIR/configs"
+    cp -rf "${release_dir}/configs" "$INSTALL_DIR/configs"
   fi
-}
-
-ensure_install_files() {
-  if [[ -f "$BIN_PATH" ]]; then
-    chmod +x "$BIN_PATH"
-  fi
-
-  if [[ ! -f "$ENV_FILE" && -f "$ENV_EXAMPLE" ]]; then
-    cp -f "$ENV_EXAMPLE" "$ENV_FILE"
-  fi
-
-  if [[ ! -f "$BIN_PATH" ]]; then
-    err "安装目录中缺少二进制文件: $BIN_PATH"
-    exit 1
-  fi
-
-  chmod +x "$BIN_PATH"
 }
 
 ensure_env_file() {
@@ -242,7 +221,6 @@ sync_db_config_to_env() {
   local password="$4"
   local dbname="$5"
 
-  ensure_env_file
   set_env_value "MYSQL_HOST" "$host"
   set_env_value "MYSQL_PORT" "$port"
   set_env_value "MYSQL_USER" "$user"
@@ -257,7 +235,7 @@ write_service() {
   cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=adnx_dns service
-After=network.target
+After=network.target mysql.service mysqld.service
 
 [Service]
 Type=simple
@@ -294,6 +272,7 @@ prompt_db_config() {
       warn "密码不能为空"
       continue
     fi
+
     read -rsp "再次输入数据库密码: " MYSQL_APP_PASSWORD2
     echo
     if [[ "$MYSQL_APP_PASSWORD" != "$MYSQL_APP_PASSWORD2" ]]; then
@@ -334,6 +313,25 @@ import_schema_with_app_user() {
   mysql -h"${MYSQL_HOST}" -P"${MYSQL_PORT}" -u"${MYSQL_APP_USER}" "-p${MYSQL_APP_PASSWORD}" "${DB_NAME}" < "$schema_path"
 }
 
+choose_package_source() {
+  echo "请选择 Linux 包来源："
+  echo "1. 从 GitHub Release 下载"
+  echo "2. 使用本地已有安装包"
+  read -rp "请输入选项 (默认 1): " PKG_CHOICE
+  PKG_CHOICE="${PKG_CHOICE:-1}"
+
+  if [[ "$PKG_CHOICE" == "2" ]]; then
+    read -rp "请输入本地安装包路径: " LOCAL_PACKAGE_PATH
+    if [[ -z "${LOCAL_PACKAGE_PATH:-}" || ! -f "${LOCAL_PACKAGE_PATH}" ]]; then
+      err "本地安装包不存在"
+      exit 1
+    fi
+    echo "$LOCAL_PACKAGE_PATH"
+  else
+    download_release_package
+  fi
+}
+
 install_app() {
   print_line
   echo "开始安装 $APP_NAME"
@@ -344,26 +342,25 @@ install_app() {
   ensure_mysql_running
   ensure_dirs
 
-  if [[ -f "./$BIN_NAME" ]]; then
-    copy_local_files
-  else
-    msg "当前目录未发现本地二进制，改为从 GitHub Release 拉取 ${GITHUB_TAG} ..."
-    download_from_github_release
-  fi
+  local pkg_path
+  pkg_path="$(choose_package_source)"
 
-  ensure_install_files
+  local release_dir
+  release_dir="$(extract_package "$pkg_path")"
+
+  copy_release_files "$release_dir"
+  ensure_env_file
 
   prompt_db_config
   create_db_and_user
 
-  local schema_path="$SCHEMA_FILE"
-  if [[ ! -f "$schema_path" ]]; then
-    err "未找到 schema.sql: $schema_path"
+  if [[ ! -f "$SCHEMA_FILE" ]]; then
+    err "未找到 schema.sql: $SCHEMA_FILE"
     exit 1
   fi
 
   msg "导入 schema.sql ..."
-  import_schema_with_app_user "$schema_path"
+  import_schema_with_app_user "$SCHEMA_FILE"
 
   sync_db_config_to_env "$MYSQL_HOST" "$MYSQL_PORT" "$MYSQL_APP_USER" "$MYSQL_APP_PASSWORD" "$DB_NAME"
 
@@ -387,13 +384,9 @@ init_db() {
   echo "初始化数据库 $DB_NAME"
   print_line
 
-  local schema_path="./schema.sql"
-  if [[ -f "$SCHEMA_FILE" ]]; then
-    schema_path="$SCHEMA_FILE"
-  fi
-
+  local schema_path="$SCHEMA_FILE"
   if [[ ! -f "$schema_path" ]]; then
-    err "未找到 schema.sql"
+    err "未找到 schema.sql: $schema_path"
     exit 1
   fi
 
@@ -434,9 +427,7 @@ edit_config_file() {
   elif command -v vi >/dev/null 2>&1; then
     vi "$ENV_FILE"
   else
-    warn "未找到 nano/vim/vi，以下是当前配置文件路径："
-    echo "$ENV_FILE"
-    echo
+    warn "未找到 nano/vim/vi，请手动编辑: $ENV_FILE"
     cat "$ENV_FILE"
   fi
 
@@ -478,7 +469,7 @@ uninstall_app() {
 show_menu() {
   clear
   print_line
-  echo "           adnx_dns 安装脚本"
+  echo "           adnx_dns 部署脚本"
   print_line
   echo "1. 安装"
   echo "2. 初始化数据库"
