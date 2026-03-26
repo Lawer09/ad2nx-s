@@ -413,22 +413,72 @@ prompt_db_config() {
   echo
 }
 
-mysql_exec_root() {
-  local sql="$1"
+mysql_root_access_mode() {
+  if mysql --protocol=socket -u"${MYSQL_ROOT_USER}" -e "SELECT 1;" >/dev/null 2>&1; then
+    echo "socket"
+    return
+  fi
+
+  if command -v sudo >/dev/null 2>&1; then
+    if sudo mysql -u"${MYSQL_ROOT_USER}" -e "SELECT 1;" >/dev/null 2>&1; then
+      echo "sudo"
+      return
+    fi
+  fi
+
+  if mysql -h"${MYSQL_HOST}" -P"${MYSQL_PORT}" -u"${MYSQL_ROOT_USER}" -e "SELECT 1;" >/dev/null 2>&1; then
+    echo "nopass"
+    return
+  fi
 
   if [[ -n "${MYSQL_ROOT_PASSWORD:-}" ]]; then
-    mysql -h"${MYSQL_HOST}" -P"${MYSQL_PORT}" -u"${MYSQL_ROOT_USER}" "-p${MYSQL_ROOT_PASSWORD}" -e "$sql"
-  else
-    mysql -h"${MYSQL_HOST}" -P"${MYSQL_PORT}" -u"${MYSQL_ROOT_USER}" -e "$sql"
+    if mysql -h"${MYSQL_HOST}" -P"${MYSQL_PORT}" -u"${MYSQL_ROOT_USER}" "-p${MYSQL_ROOT_PASSWORD}" -e "SELECT 1;" >/dev/null 2>&1; then
+      echo "password"
+      return
+    fi
   fi
+
+  echo "none"
+}
+
+mysql_exec_root() {
+  local sql="$1"
+  local mode
+  mode="$(mysql_root_access_mode)"
+
+  case "$mode" in
+    socket)
+      mysql --protocol=socket -u"${MYSQL_ROOT_USER}" -e "$sql"
+      ;;
+    sudo)
+      sudo mysql -u"${MYSQL_ROOT_USER}" -e "$sql"
+      ;;
+    nopass)
+      mysql -h"${MYSQL_HOST}" -P"${MYSQL_PORT}" -u"${MYSQL_ROOT_USER}" -e "$sql"
+      ;;
+    password)
+      mysql -h"${MYSQL_HOST}" -P"${MYSQL_PORT}" -u"${MYSQL_ROOT_USER}" "-p${MYSQL_ROOT_PASSWORD}" -e "$sql"
+      ;;
+    *)
+      err "无法以 root 身份连接 MySQL。"
+      warn "Ubuntu/Debian 常见原因是 root 使用 auth_socket/unix_socket 登录。"
+      echo
+      echo "建议先手动测试：" >&2
+      echo "  sudo mysql" >&2
+      echo
+      echo "如果可以进入，重新运行本脚本即可。" >&2
+      echo "如果仍然不行，可使用菜单 [7] 卸载 MySQL 并重新安装。" >&2
+      exit 1
+      ;;
+  esac
 }
 
 create_db_and_user() {
   msg "创建数据库和业务用户..."
-  mysql_exec_root "CREATE DATABASE IF NOT EXISTS ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+  mysql_exec_root "CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
   mysql_exec_root "CREATE USER IF NOT EXISTS '${MYSQL_APP_USER}'@'%' IDENTIFIED BY '${MYSQL_APP_PASSWORD}';"
   mysql_exec_root "ALTER USER '${MYSQL_APP_USER}'@'%' IDENTIFIED BY '${MYSQL_APP_PASSWORD}';"
-  mysql_exec_root "GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO '${MYSQL_APP_USER}'@'%';"
+  mysql_exec_root "GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${MYSQL_APP_USER}'@'%';"
   mysql_exec_root "FLUSH PRIVILEGES;"
 }
 
@@ -443,41 +493,25 @@ show_environment_status() {
   line
 
   echo "安装目录: $INSTALL_DIR"
-  if [[ -d "$INSTALL_DIR" ]]; then
-    echo "  状态: 已存在"
-  else
-    echo "  状态: 不存在"
-  fi
+  [[ -d "$INSTALL_DIR" ]] && echo "  状态: 已存在" || echo "  状态: 不存在"
 
   echo "二进制文件: $BIN_PATH"
-  if [[ -f "$BIN_PATH" ]]; then
-    echo "  状态: 已存在"
-  else
-    echo "  状态: 不存在"
-  fi
+  [[ -f "$BIN_PATH" ]] && echo "  状态: 已存在" || echo "  状态: 不存在"
 
   echo "配置文件: $ENV_FILE"
-  if [[ -f "$ENV_FILE" ]]; then
-    echo "  状态: 已存在"
-  else
-    echo "  状态: 不存在"
-  fi
+  [[ -f "$ENV_FILE" ]] && echo "  状态: 已存在" || echo "  状态: 不存在"
 
   echo "Schema 文件: $SCHEMA_FILE"
-  if [[ -f "$SCHEMA_FILE" ]]; then
-    echo "  状态: 已存在"
-  else
-    echo "  状态: 不存在"
-  fi
+  [[ -f "$SCHEMA_FILE" ]] && echo "  状态: 已存在" || echo "  状态: 不存在"
 
-  echo "MySQL: "
+  echo "MySQL:"
   if mysql_installed; then
     echo "  状态: 已安装"
   else
     echo "  状态: 未安装"
   fi
 
-  echo "MySQL 运行状态: "
+  echo "MySQL 运行状态:"
   if mysql_running; then
     echo "  状态: 运行中"
   else
@@ -519,7 +553,6 @@ install_or_update_app() {
 
   copy_release_files "$release_dir"
   ensure_env_file
-
   write_service
 
   echo "是否现在初始化数据库并写入 .env ?"
@@ -584,7 +617,7 @@ init_db() {
 
   if [[ "$REINIT" == "y" || "$REINIT" == "Y" ]]; then
     msg "删除并重建数据库 ${DB_NAME} ..."
-    mysql_exec_root "DROP DATABASE IF EXISTS ${DB_NAME};"
+    mysql_exec_root "DROP DATABASE IF EXISTS \`${DB_NAME}\`;"
   fi
 
   create_db_and_user
@@ -670,7 +703,7 @@ service_manage() {
 
 uninstall_app() {
   line
-  echo "卸载 $APP_NAME"
+  echo "卸载应用 $APP_NAME"
   line
 
   if service_installed; then
@@ -697,8 +730,48 @@ uninstall_app() {
   fi
 
   line
-  echo "卸载完成"
+  echo "应用卸载完成"
   line
+}
+
+remove_mysql_completely() {
+  local pm
+  pm="$(detect_pm)"
+
+  warn "即将卸载 MySQL/MariaDB，可能会删除现有数据库数据。"
+  read -rp "确认继续？(y/n): " CONFIRM_REMOVE
+  CONFIRM_REMOVE="${CONFIRM_REMOVE:-n}"
+
+  if [[ "$CONFIRM_REMOVE" != "y" && "$CONFIRM_REMOVE" != "Y" ]]; then
+    msg "已取消"
+    return
+  fi
+
+  case "$pm" in
+    apt)
+      systemctl stop mysql >/dev/null 2>&1 || true
+      systemctl stop mysqld >/dev/null 2>&1 || true
+      apt purge -y mysql-server mysql-client mysql-common mariadb-server mariadb-client || true
+      apt autoremove -y || true
+      rm -rf /etc/mysql /var/lib/mysql /var/log/mysql
+      ;;
+    yum)
+      systemctl stop mysqld >/dev/null 2>&1 || true
+      yum remove -y mysql-server mysql mysql-libs mariadb-server mariadb || true
+      rm -rf /etc/my.cnf /etc/my.cnf.d /var/lib/mysql /var/log/mysqld.log
+      ;;
+    dnf)
+      systemctl stop mysqld >/dev/null 2>&1 || true
+      dnf remove -y mysql-server mysql mysql-libs mariadb-server mariadb || true
+      rm -rf /etc/my.cnf /etc/my.cnf.d /var/lib/mysql /var/log/mysqld.log
+      ;;
+    *)
+      err "不支持的包管理器，无法自动卸载 MySQL"
+      return
+      ;;
+  esac
+
+  msg "MySQL/MariaDB 已卸载完成"
 }
 
 show_menu() {
@@ -711,7 +784,8 @@ show_menu() {
   echo "3. 初始化数据库"
   echo "4. 修改配置文件"
   echo "5. 服务管理"
-  echo "6. 卸载"
+  echo "6. 卸载应用"
+  echo "7. 卸载 MySQL 并重新安装"
   echo "0. 退出"
   line
 }
@@ -744,6 +818,10 @@ main() {
         ;;
       6)
         uninstall_app
+        pause_wait
+        ;;
+      7)
+        remove_mysql_completely
         pause_wait
         ;;
       0)
