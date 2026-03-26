@@ -14,6 +14,7 @@ import subprocess
 import socket
 import os
 import getpass
+import ipaddress
 from typing import Dict, List, Any, Optional, Tuple
 
 # 尝试导入依赖，缺失则提示安装
@@ -76,7 +77,7 @@ def select_ip() -> str:
     print("1) 内网IP")
     print("2) 公网IP")
     print("3) 手动输入")
-    env_choice_raw = os.environ.get("IP_CHOICE", "").strip()
+    env_choice_raw = os.environ.get("IP_CHOICE", "2").strip()
     if env_choice_raw in ("1", "2", "3"):
         choice = env_choice_raw
         print(f"使用环境变量IP_CHOICE选择: {choice}")
@@ -367,6 +368,106 @@ def _get_node_reality_server_name(node: Dict[str, Any]) -> Optional[str]:
     s = str(v).strip()
     return s if s else None
 
+
+def _normalize_host_for_compare(value: Any) -> str:
+    if value is None:
+        return ""
+    s = str(value).strip()
+    if not s:
+        return ""
+    try:
+        ipaddress.ip_address(s)
+        return s
+    except Exception:
+        return s.lower().rstrip(".")
+
+
+def _resolve_host_to_ips(host: str) -> List[str]:
+    host = (host or "").strip()
+    if not host:
+        return []
+    try:
+        ipaddress.ip_address(host)
+        return [host]
+    except Exception:
+        pass
+    try:
+        addrinfos = socket.getaddrinfo(host, 0)
+    except Exception:
+        return []
+    ips: List[str] = []
+    seen = set()
+    for _family, _socktype, _proto, _canonname, sockaddr in addrinfos:
+        if not sockaddr:
+            continue
+        ip = sockaddr[0]
+        if ip and ip not in seen:
+            seen.add(ip)
+            ips.append(ip)
+    return ips
+
+
+def resolve_fqdn_by_api(ipv4: str, domain: str) -> Optional[Dict[str, str]]:
+    api_url = os.environ.get("RESOLVE_API_URL", "http://8.221.113.81:8080/api/v1/records/resolve").strip()
+    api_token = os.environ.get("RESOLVE_API_TOKEN", "d2d").strip()
+    domain = (domain or "").strip()
+    ipv4 = (ipv4 or "").strip()
+    if not api_url or not api_token or not domain or not ipv4:
+        return None
+    try:
+        ipaddress.ip_address(ipv4)
+    except Exception:
+        return None
+    unique_raw = os.environ.get("RESOLVE_UNIQUE", "false").strip().lower()
+    unique = unique_raw in ("1", "true", "yes", "y", "on")
+
+    try:
+        resp = requests.post(
+            api_url,
+            json={"ipv4": ipv4, "domain": domain, "unique": unique},
+            headers={"X-API-Token": api_token},
+            timeout=10,
+        )
+        data = resp.json()
+    except Exception:
+        return None
+
+    if data.get("code") != 0:
+        return None
+    payload = data.get("data")
+    if not isinstance(payload, dict):
+        return None
+    fqdn = payload.get("fqdn")
+    resolved_ipv4 = payload.get("ipv4")
+    if not fqdn or not resolved_ipv4:
+        return None
+    return {"fqdn": str(fqdn).strip(), "ipv4": str(resolved_ipv4).strip()}
+
+
+def find_node_by_host(nodes: List[Dict[str, Any]], host: str) -> Optional[Dict[str, Any]]:
+    host_norm = _normalize_host_for_compare(host)
+    if not host_norm:
+        return None
+    host_ips = set(_resolve_host_to_ips(host_norm))
+    dns_cache: Dict[str, List[str]] = {}
+
+    for node in nodes:
+        node_host_norm = _normalize_host_for_compare(node.get("host"))
+        if not node_host_norm:
+            continue
+        if node_host_norm == host_norm:
+            return node
+        if not host_ips:
+            continue
+
+        node_ips = dns_cache.get(node_host_norm)
+        if node_ips is None:
+            node_ips = _resolve_host_to_ips(node_host_norm)
+            dns_cache[node_host_norm] = node_ips
+        if node_ips and (host_ips & set(node_ips)):
+            return node
+    return None
+
 def get_ip_country_code(target_ip: str = None) -> str:
     """
     获取IP所属国家的英文两位缩写（ISO 3166-1 alpha-2，如中国=CN、美国=US）
@@ -470,17 +571,25 @@ def main():
     else:
         host = select_ip()
     print()
+    selected_host = host
 
     # 5. 获取现有节点列表
     nodes = get_nodes(base_url, site_id, token)
     print(f"获取到 {len(nodes)} 个节点\n")
 
     # 6. 查找与所选 IP 匹配的节点
-    matched_node = None
-    for node in nodes:
-        if node.get('host') == host:
-            matched_node = node
-            break
+    matched_node = find_node_by_host(nodes, selected_host)
+    host_for_save = selected_host
+    if matched_node:
+        existing_host = _get_node_field_as_str(matched_node, "host")
+        if existing_host:
+            host_for_save = existing_host
+    else:
+        domain = os.environ.get("RESOLVE_DOMAIN", "aigosearch.com").strip()
+        resolved = resolve_fqdn_by_api(selected_host, domain)
+        if resolved and resolved.get("fqdn"):
+            host_for_save = resolved["fqdn"]
+            print(f"已通过解析接口将 {selected_host} 解析为 {host_for_save}\n")
 
     default_node_name = get_ip_country_code()
     default_port = generate_available_port()
@@ -492,7 +601,7 @@ def main():
         default_server_port = _get_node_field_as_str(matched_node, "server_port")
         default_server_name = _get_node_reality_server_name(matched_node)
 
-        print(f"已存在节点（ID: {matched_node.get('id')}，host: {host}），当前参数：")
+        print(f"已存在节点（ID: {matched_node.get('id')}，host: {matched_node.get('host')}），当前参数：")
         print(f"- 节点名称: {default_node_name or ''}")
         print(f"- port: {default_port or ''}")
         print(f"- server_port: {default_server_port or ''}")
@@ -518,7 +627,7 @@ def main():
     # 新字段（要更新的部分）
     new_fields = {
         'name': node_name,
-        'host': host,
+        'host': host_for_save,
         'port': port,
         'server_port': server_port,
         'protocol_settings': {
@@ -532,11 +641,12 @@ def main():
     }
 
     if matched_node:
-        print(f"找到 host 为 {host} 的现有节点（ID: {matched_node.get('id')}），将基于此配置更新。")
+        print(f"找到 host 为 {selected_host} 的现有节点（ID: {matched_node.get('id')}），将基于此配置更新。")
         # 基于现有节点配置进行合并
         final_config = merge_node_config(matched_node, new_fields)
     else:
-        print(f"未找到 host 为 {host} 的节点，将创建新节点。")
+        print(f"未找到 host 为 {selected_host} 的节点，将创建新节点。")
+        
         # 创建新节点，使用默认值
         final_config = {
             "id": None,
@@ -551,7 +661,7 @@ def main():
             "excludes": [],
             "ips": [],
             "group_ids": ["2"],
-            "host": host,
+            "host": host_for_save,
             "port": port,
             "server_port": server_port,
             "parent_id": "0",
@@ -588,11 +698,7 @@ def main():
     if save_node(base_url, site_id, token, final_config):
         print("\n正在重新拉取节点信息...")
         refreshed_nodes = get_nodes(base_url, site_id, token)
-        matched_after_save = None
-        for node in refreshed_nodes:
-            if node.get("host") == host:
-                matched_after_save = node
-                break
+        matched_after_save = find_node_by_host(refreshed_nodes, host_for_save)
         node_id_value = ""
         if matched_after_save is not None:
             node_id_value = str(matched_after_save.get("id") or "")
@@ -606,7 +712,7 @@ def main():
                 }
             )
         else:
-            print(f"未在 data 中找到 host={host} 的节点，无法写入 NODE_ID。")
+            print(f"未在 data 中找到 host={host_for_save} 的节点，无法写入 NODE_ID。")
         print("操作完成")
     else:
         print("保存失败")
