@@ -1,0 +1,117 @@
+{
+    "Log": {
+        "Level": "error",
+        "Output": ""
+    },
+    "Cores": [
+        {
+            "Type": "xray",
+            "Log": {
+                "Level": "error",
+                "ErrorPath": "/etc/ad2nx/error.log"
+            },
+            "OutboundConfigPath": "/etc/ad2nx/custom_outbound.json",
+            "RouteConfigPath": "/etc/ad2nx/route.json"
+        },
+        {
+            "Type": "sing",
+            "Log": {
+                "Level": "error",
+                "Timestamp": true
+            },
+            "NTP": {
+                "Enable": false,
+                "Server": "time.apple.com",
+                "ServerPort": 0
+            },
+            "OriginalPath": "/etc/ad2nx/sing_origin.json"
+        },
+        {
+            "Type": "hysteria2",
+            "Log": {
+                "Level": "error"
+            }
+        }
+    ],
+    "Nodes": [
+        {
+            "Core": "xray",
+            "ApiHost": "https://example.com",
+            "ApiKey": "your-api-key",
+            "NodeID": 1,
+            "NodeType": "vless",
+            "Timeout": 30,
+            "ListenIP": "0.0.0.0",
+            "SendIP": "0.0.0.0",
+            "DeviceOnlineMinTraffic": 200,
+            "MinReportTraffic": 0,
+            "EnableProxyProtocol": false,
+            "EnableUot": true,
+            "EnableTFO": true,
+            "DNSType": "UseIPv4",
+            "CertConfig": {
+                "CertMode": "http",
+                "RejectUnknownSni": false,
+                "CertDomain": "example.com",
+                "CertFile": "/etc/ad2nx/fullchain.cer",
+                "KeyFile": "/etc/ad2nx/cert.key",
+                "Email": "ad2nx@github.com",
+                "Provider": "cloudflare",
+                "DNSEnv": {
+                    "EnvName": "env1"
+                }
+            }
+        },
+        {
+            "Core": "sing",
+            "ApiHost": "https://example.com",
+            "ApiKey": "your-api-key",
+            "NodeID": 2,
+            "NodeType": "shadowsocks",
+            "Timeout": 30,
+            "ListenIP": "::",
+            "SendIP": "0.0.0.0",
+            "DeviceOnlineMinTraffic": 200,
+            "MinReportTraffic": 0,
+            "TCPFastOpen": true,
+            "SniffEnabled": true,
+            "CertConfig": {
+                "CertMode": "none",
+                "RejectUnknownSni": false,
+                "CertDomain": "example.com",
+                "CertFile": "/etc/ad2nx/fullchain.cer",
+                "KeyFile": "/etc/ad2nx/cert.key",
+                "Email": "ad2nx@github.com",
+                "Provider": "cloudflare",
+                "DNSEnv": {
+                    "EnvName": "env1"
+                }
+            }
+        },
+        {
+            "Core": "hysteria2",
+            "ApiHost": "https://example.com",
+            "ApiKey": "your-api-key",
+            "NodeID": 3,
+            "NodeType": "hysteria2",
+            "Hysteria2ConfigPath": "/etc/ad2nx/hy2config.yaml",
+            "Timeout": 30,
+            "ListenIP": "",
+            "SendIP": "0.0.0.0",
+            "DeviceOnlineMinTraffic": 200,
+            "MinReportTraffic": 0,
+            "CertConfig": {
+                "CertMode": "http",
+                "RejectUnknownSni": false,
+                "CertDomain": "example.com",
+                "CertFile": "/etc/ad2nx/fullchain.cer",
+                "KeyFile": "/etc/ad2nx/cert.key",
+                "Email": "ad2nx@github.com",
+                "Provider": "cloudflare",
+                "DNSEnv": {
+                    "EnvName": "env1"
+                }
+            }
+        }
+    ]
+}

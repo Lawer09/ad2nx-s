@@ -4,8 +4,8 @@
 # export API_HOST="api.example.com"
 # export API_KEY="your-api-key"
 # export NODE_ID="1"
-# export CORE_TYPE="2"  # 1=xray, 2=singbox, 3=hysteria2
-# export NODE_TYPE="2"  # 1=shadowsocks, 2=vless, 3=vmess, 4=hysteria, 5=hysteria2, 6=trojan, 7=tuic, 8=anytls
+# export CORE_TYPE="sing"  # 1=xray, 2=singbox, 3=hysteria2
+# export NODE_TYPE="vless"  # 1=shadowsocks, 2=vless, 3=vmess, 4=hysteria, 5=hysteria2, 6=trojan, 7=tuic, 8=anytls
 # bash auto-install.sh
 
 set -euo pipefail
@@ -98,9 +98,8 @@ init_variables() {
     
     # 节点配置
     NODE_INOUT_TYPE="${NODE_INOUT_TYPE:-stand}"
-    NODE_TYPE="${NODE_TYPE:-2}"  # 默认vless
-    NODE_TYPE2="${NODE_TYPE2:-}"
-    CORE_TYPE="${CORE_TYPE:-2}"  # 默认singbox
+    NODE_TYPE="${NODE_TYPE:-vless}"  # 默认vless
+    CORE_TYPE="${CORE_TYPE:-singbox}"  # 默认singbox
     
     # 证书配置
     CERT_MODE="${CERT_MODE:-none}"
@@ -257,10 +256,7 @@ check_ipv6_support() {
     fi
 }
 
-# 删除 generate_node_config 函数（不再需要）
-# 已集成到 generate_config_file 中
-
-# 生成配置文件（集成 initconfig.sh 的完整逻辑）
+# 生成配置文件
 generate_config_file() {
     echo -e "${green}正在生成完整配置文件...${plain}"
     
@@ -268,42 +264,19 @@ generate_config_file() {
         mkdir -p /etc/ad2nx
     fi
     
-    # 转换NODE_TYPE数字为字符串
-    local node_type_str="vless"
-    case "${NODE_TYPE:-2}" in
-        1) node_type_str="shadowsocks" ;;
-        2) node_type_str="vless" ;;
-        3) node_type_str="vmess" ;;
-        4) node_type_str="hysteria" ;;
-        5) node_type_str="hysteria2" ;;
-        6) node_type_str="trojan" ;;
-        7) node_type_str="tuic" ;;
-        8) node_type_str="anytls" ;;
-    esac
-    
-    # 转换CORE_TYPE数字为字符串和标志
-    local core_str="sing"
-    local core_xray=false core_sing=false core_hysteria2=false
-    
-    case "${CORE_TYPE:-2}" in
-        1) core_str="xray"; core_xray=true ;;
-        2) core_str="sing"; core_sing=true ;;
-        3) core_str="hysteria2"; core_hysteria2=true ;;
-    esac
-    
     local ipv6_support=$(check_ipv6_support)
     local listen_ip="0.0.0.0"
     [[ $ipv6_support -eq 1 ]] && listen_ip="::"
     
     # 生成节点配置（根据核心类型）
     local node_config=""
-    if [ "$core_str" == "xray" ]; then 
+    if [ "$CORE_TYPE" == "xray" ]; then 
         node_config="{
-            \"Core\": \"$core_str\",
+            \"Core\": \"$CORE_TYPE\",
             \"ApiHost\": \"$API_HOST\",
             \"ApiKey\": \"$API_KEY\",
             \"NodeID\": ${NODE_ID},
-            \"NodeType\": \"$node_type_str\",
+            \"NodeType\": \"$NODE_TYPE\",
             \"Timeout\": 30,
             \"ListenIP\": \"0.0.0.0\",
             \"SendIP\": \"0.0.0.0\",
@@ -324,13 +297,13 @@ generate_config_file() {
                 \"DNSEnv\": {\"EnvName\": \"env1\"}
             }
         }"
-    elif [ "$core_str" == "sing" ]; then
+    elif [ "$CORE_TYPE" == "sing" ]; then
         node_config="{
-            \"Core\": \"$core_str\",
+            \"Core\": \"$CORE_TYPE\",
             \"ApiHost\": \"$API_HOST\",
             \"ApiKey\": \"$API_KEY\",
             \"NodeID\": ${NODE_ID},
-            \"NodeType\": \"$node_type_str\",
+            \"NodeType\": \"$NODE_TYPE\",
             \"Timeout\": 30,
             \"ListenIP\": \"$listen_ip\",
             \"SendIP\": \"0.0.0.0\",
@@ -349,13 +322,13 @@ generate_config_file() {
                 \"DNSEnv\": {\"EnvName\": \"env1\"}
             }
         }"
-    elif [ "$core_str" == "hysteria2" ]; then
+    elif [ "$CORE_TYPE" == "hysteria2" ]; then
         node_config="{
-            \"Core\": \"$core_str\",
+            \"Core\": \"$CORE_TYPE\",
             \"ApiHost\": \"$API_HOST\",
             \"ApiKey\": \"$API_KEY\",
             \"NodeID\": ${NODE_ID},
-            \"NodeType\": \"$node_type_str\",
+            \"NodeType\": \"$NODE_TYPE\",
             \"Hysteria2ConfigPath\": \"/etc/ad2nx/hy2config.yaml\",
             \"Timeout\": 30,
             \"ListenIP\": \"\",
@@ -377,9 +350,9 @@ generate_config_file() {
     
     # 初始化核心配置
     local cores_config="["
-    [[ "$core_xray" == "true" ]] && cores_config+="{\"Type\":\"xray\",\"Log\":{\"Level\":\"error\"},\"OutboundConfigPath\":\"/etc/ad2nx/custom_outbound.json\",\"RouteConfigPath\":\"/etc/ad2nx/route.json\"},"
-    [[ "$core_sing" == "true" ]] && cores_config+="{\"Type\":\"sing\",\"Log\":{\"Level\":\"error\"},\"OriginalPath\":\"/etc/ad2nx/sing_origin.json\"},"
-    [[ "$core_hysteria2" == "true" ]] && cores_config+="{\"Type\":\"hysteria2\",\"Log\":{\"Level\":\"error\"}},"
+    [[ "$CORE_TYPE" == "xray" ]] && cores_config+="{\"Type\":\"xray\",\"Log\":{\"Level\":\"error\"},\"OutboundConfigPath\":\"/etc/ad2nx/custom_outbound.json\",\"RouteConfigPath\":\"/etc/ad2nx/route.json\"},"
+    [[ "$CORE_TYPE" == "sing" ]] && cores_config+="{\"Type\":\"sing\",\"Log\":{\"Level\":\"error\"},\"OriginalPath\":\"/etc/ad2nx/sing_origin.json\"},"
+    [[ "$CORE_TYPE" == "hysteria2" ]] && cores_config+="{\"Type\":\"hysteria2\",\"Log\":{\"Level\":\"error\"}},"
     cores_config="${cores_config%,}]"
     
     cd /etc/ad2nx
@@ -442,40 +415,87 @@ ROUTEEOF
 CUSTOMEOF
     
     # singbox特定配置
-    if [ "$core_sing" = "true" ]; then
+    if [ "$CORE_TYPE" = "sing" ]; then
         local dnsstrategy="ipv4_only"
         [[ $ipv6_support -eq 1 ]] && dnsstrategy="prefer_ipv4"
-        
-        if [[ "${NODE_INOUT_TYPE}" == "in" && -n "${OUT_NODE_SERVER:-}" ]]; then
-            cat > /etc/ad2nx/sing_origin.json <<'SINGEOF'
+        cat > /etc/ad2nx/sing_origin.json <<'SINGEOF'
 {
-  "dns": {"servers": [{"tag": "cf", "address": "1.1.1.1"}], "strategy": "prefer_ipv4"},
-  "outbounds": [
-    {"type": "vless", "tag": "to-out", "server": "OUT_NODE_SERVER_HOST", "server_port": OUT_NODE_SERVER_PORT,
-     "uuid": "OUT_UUID", "tls": {"enabled": true, "server_name": "OUT_REALITY_SERVER"}},
-    {"type": "block", "tag": "block"}
-  ],
-  "route": {"rules": [{"ip_is_private": true, "outbound": "block"}, {"outbound": "to-out", "network": ["udp","tcp"]}]},
-  "experimental": {"cache_file": {"enabled": true}}
+    "dns": {
+        "servers": [
+            {
+                "tag": "cf",
+                "address": "1.1.1.1"
+            }
+        ],
+        "strategy": "prefer_ipv4"
+    },
+    "outbounds": [
+        {
+            "tag": "direct",
+            "type": "direct",
+            "domain_resolver": {
+                "server": "cf",
+                "strategy": "prefer_ipv4"
+            }
+        },
+        {
+            "type": "block",
+            "tag": "block"
+        }
+    ],
+    "route": {
+        "rules": [
+            {
+                "ip_is_private": true,
+                "outbound": "block"
+            },
+            {
+                "domain_regex": [
+                    "(api|ps|sv|offnavi|newvector|ulog.imap|newloc)(.map|).(baidu|n.shifen).com",
+                    "(.+.|^)(360|so).(cn|com)",
+                    "(Subject|HELO|SMTP)",
+                    "(torrent|.torrent|peer_id=|info_hash|get_peers|find_node|BitTorrent|announce_peer|announce.php?passkey=)",
+                    "(^.@)(guerrillamail|guerrillamailblock|sharklasers|grr|pokemail|spam4|bccto|chacuo|027168).(info|biz|com|de|net|org|me|la)",
+                    "(.?)(xunlei|sandai|Thunder|XLLiveUD)(.)",
+                    "(..||)(dafahao|mingjinglive|botanwang|minghui|dongtaiwang|falunaz|epochtimes|ntdtv|falundafa|falungong|wujieliulan|zhengjian).(org|com|net)",
+                    "(ed2k|.torrent|peer_id=|announce|info_hash|get_peers|find_node|BitTorrent|announce_peer|announce.php?passkey=|magnet:|xunlei|sandai|Thunder|XLLiveUD|bt_key)",
+                    "(.+.|^)(360).(cn|com|net)",
+                    "(.*.||)(guanjia.qq.com|qqpcmgr|QQPCMGR)",
+                    "(.*.||)(rising|kingsoft|duba|xindubawukong|jinshanduba).(com|net|org)",
+                    "(.*.||)(netvigator|torproject).(com|cn|net|org)",
+                    "(..||)(visa|mycard|gash|beanfun|bank).",
+                    "(.*.||)(gov|12377|12315|talk.news.pts.org|creaders|zhuichaguoji|efcc.org|cyberpolice|aboluowang|tuidang|epochtimes|zhengjian|110.qq|mingjingnews|inmediahk|xinsheng|breakgfw|chengmingmag|jinpianwang|qi-gong|mhradio|edoors|renminbao|soundofhope|xizang-zhiye|bannedbook|ntdtv|12321|secretchina|dajiyuan|boxun|chinadigitaltimes|dwnews|huaglad|oneplusnews|epochweekly|cn.rfi).(cn|com|org|net|club|net|fr|tw|hk|eu|info|me)",
+                    "(.*.||)(miaozhen|cnzz|talkingdata|umeng).(cn|com)",
+                    "(.*.||)(mycard).(com|tw)",
+                    "(.*.||)(gash).(com|tw)",
+                    "(.bank.)",
+                    "(.*.||)(pincong).(rocks)",
+                    "(.*.||)(taobao).(com)",
+                    "(.*.||)(laomoe|jiyou|ssss|lolicp|vv1234|0z|4321q|868123|ksweb|mm126).(com|cloud|fun|cn|gs|xyz|cc)",
+                    "(flows|miaoko).(pages).(dev)"
+                ],
+                "outbound": "block"
+            },
+            {
+                "outbound": "direct",
+                "network": [
+                    "udp",
+                    "tcp"
+                ]
+            }
+        ]
+    },
+    "experimental": {
+        "cache_file": {
+            "enabled": true
+        }
+    }
 }
 SINGEOF
-        else
-            cat > /etc/ad2nx/sing_origin.json <<'SINGEOF'
-{
-  "dns": {"servers": [{"tag": "cf", "address": "1.1.1.1"}], "strategy": "ipv4_only"},
-  "outbounds": [
-    {"tag": "direct", "type": "direct"},
-    {"type": "block", "tag": "block"}
-  ],
-  "route": {"rules": [{"ip_is_private": true, "outbound": "block"}, {"outbound": "direct", "network": ["udp","tcp"]}]},
-  "experimental": {"cache_file": {"enabled": true}}
-}
-SINGEOF
-        fi
     fi
     
     # Hysteria2配置
-    [[ "$core_hysteria2" == "true" ]] && cat > /etc/ad2nx/hy2config.yaml <<'HY2EOF'
+    [[ "$CORE_TYPE" == "hysteria2" ]] && cat > /etc/ad2nx/hy2config.yaml <<'HY2EOF'
 quic:
   initStreamReceiveWindow: 8388608
   maxStreamReceiveWindow: 8388608
@@ -597,49 +617,6 @@ SYSTEMD
     echo -e "${green}ad2nx 安装完成${plain}"
 }
 
-# 执行注册脚本
-execute_register_py() {
-    if [[ "${IF_REGISTER}" != [Yy] ]]; then
-        return 0
-    fi
-    
-    echo -e "${green}正在下载并执行 register.py...${plain}"
-    
-    cd "$cur_dir"
-    
-    # 下载 register.py
-    github_contents_download "register.py" "./register.py"
-    if [[ $? -ne 0 ]]; then
-        echo -e "${red}下载 register.py 失败${plain}"
-        return 1
-    fi
-    
-    chmod +x ./register.py
-    
-    # 执行 register.py
-    if command -v python3 >/dev/null 2>&1; then
-        python3 ./register.py
-        local register_code=$?
-    elif command -v python >/dev/null 2>&1; then
-        python ./register.py
-        local register_code=$?
-    else
-        echo -e "${red}未找到 python3/python，无法运行 register.py${plain}"
-        rm -f ./register.py
-        return 1
-    fi
-    
-    rm -f ./register.py
-    
-    if [[ $register_code -ne 0 ]]; then
-        echo -e "${red}register.py 执行失败（错误码：$register_code）${plain}"
-        return 1
-    fi
-    
-    echo -e "${green}register.py 执行成功${plain}"
-    return 0
-}
-
 # 启动服务
 start_service() {
     echo -e "${green}正在启动服务...${plain}"
@@ -691,14 +668,6 @@ main() {
     
     if [[ "${IF_GENERATE}" == [Yy] ]]; then
         generate_config_file
-        
-        # 如果生成了配置文件，执行注册脚本
-        if [[ "${IF_REGISTER}" == [Yy] ]]; then
-            execute_register_py
-            if [[ $? -ne 0 ]]; then
-                echo -e "${yellow}注册脚本执行失败，继续安装流程${plain}"
-            fi
-        fi
     fi
     
     start_service
