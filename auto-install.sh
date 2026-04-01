@@ -738,12 +738,6 @@ main() {
     # 始终生成配置文件，确保所有必要文件存在
     generate_config_file
 
-    # 检查 singbox 特有配置
-    if [[ "$CORE_TYPE" == "sing" && ! -f /etc/ad2nx/sing_origin.json ]]; then
-        echo "sing_origin.json missing, regenerating..."
-        generate_config_file
-    fi
-
     start_service
 
     echo ""
