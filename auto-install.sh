@@ -730,8 +730,6 @@ main() {
     echo "NODE_ID: ${NODE_ID}"
     echo "CORE_TYPE: ${CORE_TYPE}"
     echo "NODE_TYPE: ${NODE_TYPE}"
-    echo "IF_REGISTER: ${IF_REGISTER}"
-    echo "IF_GENERATE: ${IF_GENERATE}"
     echo ""
     
     install_base
