@@ -30,7 +30,24 @@ echo "内核版本: $(uname -r)"
 echo "架构: $(uname -m)"
 echo ""
 
-set -euo pipefail
+# 使用更宽松的错误处理，避免静默退出
+# set -euo pipefail  # 已禁用，改用手动错误检查
+set -e  # 仅在命令失败时退出，但允许更多容错
+
+# 错误追踪函数
+trap_error() {
+    local exit_code=$?
+    local line_no=$1
+    echo ""
+    echo -e "\033[0;31m========================================\033[0m"
+    echo -e "\033[0;31m错误: 脚本在第 ${line_no} 行异常退出\033[0m"
+    echo -e "\033[0;31m退出码: ${exit_code}\033[0m"
+    echo -e "\033[0;31m========================================\033[0m"
+    exit $exit_code
+}
+
+# 启用错误追踪
+trap 'trap_error ${LINENO}' ERR
 
 red='\033[0;31m'
 green='\033[0;32m'
@@ -39,6 +56,7 @@ plain='\033[0m'
 
 # 必需的环境变量检查
 check_required_env() {
+    echo -e "${yellow}[2/5] 检查环境变量...${plain}"
     local missing_vars=()
     
     [[ -z "${API_HOST:-}" ]] && missing_vars+=("API_HOST")
@@ -52,63 +70,103 @@ check_required_env() {
         echo "  API_HOST      - API 服务器地址"
         echo "  API_KEY       - API 密钥"
         echo "  NODE_ID       - 节点 ID（数字）"
-        echo "  CORE_TYPE     - 核心类型（1=xray, 2=singbox, 3=hysteria2）"
+        echo "  CORE_TYPE     - 核心类型（xray, sing, hysteria2）"
+        echo ""
+        echo -e "${yellow}使用示例：${plain}"
+        echo "  export API_HOST=\"api.example.com\""
+        echo "  export API_KEY=\"your-api-key\""
+        echo "  export NODE_ID=\"1\""
+        echo "  export CORE_TYPE=\"sing\""
         exit 1
     fi
+    echo -e "${green}✓ 环境变量检查通过${plain}"
 }
 
 # 检查root权限
 check_root() {
-    [[ $EUID -ne 0 ]] && echo -e "${red}错误：必须使用root用户运行此脚本！${plain}" && exit 1
+    echo -e "${yellow}[1/5] 检查root权限...${plain}"
+    if [[ $EUID -ne 0 ]]; then
+        echo -e "${red}错误：必须使用root用户运行此脚本！${plain}"
+        echo -e "${yellow}当前用户ID: $EUID (需要: 0)${plain}"
+        echo -e "${yellow}提示: 请使用 sudo bash auto-install.sh 运行${plain}"
+        exit 1
+    fi
+    echo -e "${green}✓ Root权限检查通过${plain}"
 }
 
 # 检查系统类型
 check_system() {
-    if [[ -f /etc/redhat-release ]]; then
-        release="centos"
-    elif cat /etc/issue | grep -Eqi "alpine"; then
-        release="alpine"
-    elif cat /etc/issue | grep -Eqi "debian"; then
-        release="debian"
-    elif cat /etc/issue | grep -Eqi "ubuntu"; then
-        release="ubuntu"
-    elif cat /etc/issue | grep -Eqi "centos|red hat|redhat|rocky|alma|oracle linux"; then
-        release="centos"
-    elif cat /proc/version | grep -Eqi "debian"; then
-        release="debian"
-    elif cat /proc/version | grep -Eqi "ubuntu"; then
-        release="ubuntu"
-    elif cat /proc/version | grep -Eqi "centos|red hat|redhat|rocky|alma|oracle linux"; then
-        release="centos"
-    elif cat /proc/version | grep -Eqi "arch"; then
-        release="arch"
-    else
-        echo -e "${red}未检测到支持的系统版本${plain}"
+    echo -e "${yellow}[3/5] 检查系统类型...${plain}"
+    
+    # 检查关键系统文件是否存在
+    if [[ ! -f /etc/issue && ! -f /proc/version ]]; then
+        echo -e "${red}错误：未检测到Linux系统文件 (/etc/issue 或 /proc/version)${plain}"
+        echo -e "${yellow}提示：此脚本必须在Linux系统中运行 (如 Ubuntu, Debian, CentOS)${plain}"
+        echo -e "${yellow}如果您在Windows上，请使用WSL (Windows Subsystem for Linux)${plain}"
         exit 1
     fi
     
-    echo -e "${green}系统：${release}${plain}"
+    release=""
+    
+    # 使用 || true 防止 grep 没有匹配时导致退出
+    if [[ -f /etc/redhat-release ]]; then
+        release="centos"
+    elif [[ -f /etc/issue ]] && grep -Eqi "alpine" /etc/issue 2>/dev/null; then
+        release="alpine"
+    elif [[ -f /etc/issue ]] && grep -Eqi "debian" /etc/issue 2>/dev/null; then
+        release="debian"
+    elif [[ -f /etc/issue ]] && grep -Eqi "ubuntu" /etc/issue 2>/dev/null; then
+        release="ubuntu"
+    elif [[ -f /etc/issue ]] && grep -Eqi "centos|red hat|redhat|rocky|alma|oracle linux" /etc/issue 2>/dev/null; then
+        release="centos"
+    elif [[ -f /proc/version ]] && grep -Eqi "debian" /proc/version 2>/dev/null; then
+        release="debian"
+    elif [[ -f /proc/version ]] && grep -Eqi "ubuntu" /proc/version 2>/dev/null; then
+        release="ubuntu"
+    elif [[ -f /proc/version ]] && grep -Eqi "centos|red hat|redhat|rocky|alma|oracle linux" /proc/version 2>/dev/null; then
+        release="centos"
+    elif [[ -f /proc/version ]] && grep -Eqi "arch" /proc/version 2>/dev/null; then
+        release="arch"
+    fi
+    
+    if [[ -z "$release" ]]; then
+        echo -e "${red}错误：未检测到支持的系统版本${plain}"
+        echo -e "${yellow}支持的系统：Ubuntu, Debian, CentOS, Alpine, Arch Linux${plain}"
+        if [[ -f /etc/issue ]]; then
+            echo -e "${yellow}当前系统信息 (/etc/issue):${plain}"
+            cat /etc/issue 2>/dev/null || true
+        fi
+        if [[ -f /proc/version ]]; then
+            echo -e "${yellow}当前系统信息 (/proc/version):${plain}"
+            cat /proc/version 2>/dev/null || true
+        fi
+        exit 1
+    fi
+    
+    echo -e "${green}✓ 系统类型：${release}${plain}"
 }
 
 # 检查架构
 check_arch() {
-    arch=$(uname -m)
+    echo -e "${yellow}[4/5] 检查系统架构...${plain}"
+    local raw_arch=$(uname -m)
     
-    if [[ $arch == "x86_64" || $arch == "x64" || $arch == "amd64" ]]; then
+    if [[ $raw_arch == "x86_64" || $raw_arch == "x64" || $raw_arch == "amd64" ]]; then
         arch="64"
-    elif [[ $arch == "aarch64" || $arch == "arm64" ]]; then
+    elif [[ $raw_arch == "aarch64" || $raw_arch == "arm64" ]]; then
         arch="arm64-v8a"
-    elif [[ $arch == "s390x" ]]; then
+    elif [[ $raw_arch == "s390x" ]]; then
         arch="s390x"
     else
         arch="64"
     fi
     
-    echo -e "${green}架构：${arch}${plain}"
+    echo -e "${green}✓ 系统架构：${raw_arch} -> ${arch}${plain}"
 }
 
 # 初始化变量
 init_variables() {
+    echo -e "${yellow}[5/5] 初始化配置变量...${plain}"
     cur_dir=$(pwd)
     
     # 默认值
@@ -132,7 +190,7 @@ init_variables() {
     IF_GENERATE="${IF_GENERATE:-y}"
     IF_REGISTER="${IF_REGISTER:-n}"
     
-    echo -e "${green}环境变量已初始化${plain}"
+    echo -e "${green}✓ 配置变量初始化完成${plain}"
 }
 
 # 卸载现有的ad2nx（如果存在）
@@ -541,14 +599,27 @@ install_ad2nx() {
     cd /usr/local/ad2nx/
 
     # 获取最新版本
-    local last_version=$(github_api_get "${GITHUB_API_BASE}/repos/${RELEASE_REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    echo -e "${yellow}正在获取最新版本信息...${plain}"
+    local release_info=$(github_api_get "${GITHUB_API_BASE}/repos/${RELEASE_REPO}/releases/latest")
     
-    if [[ ! -n "$last_version" ]]; then
-        echo -e "${red}获取版本失败${plain}"
+    if [[ -z "$release_info" ]]; then
+        echo -e "${red}获取版本信息失败：无法连接到 GitHub API${plain}"
+        echo -e "${yellow}请检查网络连接或 GitHub API 访问${plain}"
+        exit 1
+    fi
+    
+    local last_version=$(echo "$release_info" | grep '"tag_name":' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
+    
+    if [[ -z "$last_version" ]]; then
+        echo -e "${red}获取版本失败：无法解析版本号${plain}"
+        echo -e "${yellow}API 响应:${plain}"
+        echo "$release_info" | head -n 20
         exit 1
     fi
     
     echo -e "${green}检测到最新版本：${last_version}${plain}"
+    
+    echo -e "${yellow}正在下载 ad2nx...${plain}"
     github_release_download_zip "${last_version}" "/usr/local/ad2nx/ad2nx-linux.zip"
     
     if [[ $? -ne 0 ]]; then
@@ -644,21 +715,27 @@ start_service() {
     echo -e "${green}正在启动服务...${plain}"
     
     if [[ x"${release}" == x"alpine" ]]; then
-        service ad2nx start
+        service ad2nx start || {
+            echo -e "${red}服务启动失败${plain}"
+            return 1
+        }
     else
-        systemctl enable ad2nx
-        systemctl start ad2nx
+        systemctl enable ad2nx || echo -e "${yellow}警告: 无法设置开机自启${plain}"
+        systemctl start ad2nx || {
+            echo -e "${red}服务启动失败${plain}"
+            return 1
+        }
     fi
     
     sleep 2
     
     if [[ x"${release}" == x"alpine" ]]; then
-        if service ad2nx status | grep -q "started"; then
+        if service ad2nx status 2>/dev/null | grep -q "started"; then
             echo -e "${green}服务启动成功${plain}"
             return 0
         fi
     else
-        if systemctl is-active --quiet ad2nx; then
+        if systemctl is-active --quiet ad2nx 2>/dev/null; then
             echo -e "${green}服务启动成功${plain}"
             return 0
         fi
