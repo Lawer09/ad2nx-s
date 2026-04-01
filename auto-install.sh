@@ -8,6 +8,28 @@
 # export NODE_TYPE="vless"  # 1=shadowsocks, 2=vless, 3=vmess, 4=hysteria, 5=hysteria2, 6=trojan, 7=tuic, 8=anytls
 # bash auto-install.sh
 
+# 启动脚本时输出提示
+echo "=========================================="
+echo "ad2nx 自动安装脚本启动中..."
+echo "=========================================="
+echo "当前用户: $(whoami)"
+echo "当前用户ID: $EUID"
+echo "当前路径: $(pwd)"
+echo "Bash版本: $BASH_VERSION"
+echo ""
+echo "==================== 环境变量检查 ===================="
+echo "API_HOST: ${API_HOST:-未设置}"
+echo "API_KEY: ${API_KEY:-未设置}"
+echo "NODE_ID: ${NODE_ID:-未设置}"
+echo "CORE_TYPE: ${CORE_TYPE:-未设置}"
+echo "NODE_TYPE: ${NODE_TYPE:-未设置}"
+echo ""
+echo "==================== 系统信息 ===================="
+echo "操作系统: $(uname -s)"
+echo "内核版本: $(uname -r)"
+echo "架构: $(uname -m)"
+echo ""
+
 set -euo pipefail
 
 red='\033[0;31m'
@@ -648,6 +670,10 @@ start_service() {
 
 # 主流程
 main() {
+    echo -e "${green}========== ad2nx 自动安装脚本 ==========${plain}"
+    echo -e "${yellow}正在进行环境检查...${plain}"
+    echo ""
+    
     check_root
     init_variables
     check_required_env
