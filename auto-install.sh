@@ -8,29 +8,6 @@
 # export NODE_TYPE="vless"  # 1=shadowsocks, 2=vless, 3=vmess, 4=hysteria, 5=hysteria2, 6=trojan, 7=tuic, 8=anytls
 # bash auto-install.sh
 
-# 启动脚本时输出提示
-echo "=========================================="
-echo "ad2nx 自动安装脚本启动中..."
-echo "=========================================="
-echo "当前用户: $(whoami)"
-echo "当前用户ID: $EUID"
-echo "当前路径: $(pwd)"
-echo "Bash版本: $BASH_VERSION"
-echo ""
-echo "==================== 环境变量检查 ===================="
-echo "API_HOST: ${API_HOST:-未设置}"
-echo "API_KEY: ${API_KEY:-未设置}"
-echo "NODE_ID: ${NODE_ID:-未设置}"
-echo "CORE_TYPE: ${CORE_TYPE:-未设置}"
-echo "NODE_TYPE: ${NODE_TYPE:-未设置}"
-echo ""
-echo "==================== 系统信息 ===================="
-echo "操作系统: $(uname -s)"
-echo "内核版本: $(uname -r)"
-echo "架构: $(uname -m)"
-echo ""
-
-# 使用更宽松的错误处理，避免静默退出
 # set -euo pipefail  # 已禁用，改用手动错误检查
 set -e  # 仅在命令失败时退出，但允许更多容错
 
@@ -179,16 +156,11 @@ init_variables() {
     # 节点配置
     NODE_INOUT_TYPE="${NODE_INOUT_TYPE:-stand}"
     NODE_TYPE="${NODE_TYPE:-vless}"  # 默认vless
-    CORE_TYPE="${CORE_TYPE:-singbox}"  # 默认singbox
+    CORE_TYPE="${CORE_TYPE:-sing}"  # 默认sing-box
     
     # 证书配置
     CERT_MODE="${CERT_MODE:-none}"
     CERT_DOMAIN="${CERT_DOMAIN:-example.com}"
-    
-    # 其他配置
-    CONTINUE_PROMPT="${CONTINUE_PROMPT:-y}"
-    IF_GENERATE="${IF_GENERATE:-y}"
-    IF_REGISTER="${IF_REGISTER:-n}"
     
     echo -e "${green}✓ 配置变量初始化完成${plain}"
 }
