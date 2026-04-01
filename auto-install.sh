@@ -16,24 +16,19 @@ trap_error() {
     local exit_code=$?
     local line_no=$1
     echo ""
-    echo -e "\033[0;31m========================================\033[0m"
-    echo -e "\033[0;31m错误: 脚本在第 ${line_no} 行异常退出\033[0m"
-    echo -e "\033[0;31m退出码: ${exit_code}\033[0m"
-    echo -e "\033[0;31m========================================\033[0m"
+    echo "ERROR: Script failed at line ${line_no}"
+    echo "Exit code: ${exit_code}"
     exit $exit_code
 }
 
 # 启用错误追踪
 trap 'trap_error ${LINENO}' ERR
 
-red='\033[0;31m'
-green='\033[0;32m'
-yellow='\033[0;33m'
-plain='\033[0m'
+# Color variables removed for clean output
 
 # 必需的环境变量检查
 check_required_env() {
-    echo -e "${yellow}[2/5] 检查环境变量...${plain}"
+    echo "[2/5] Checking environment variables..."
     local missing_vars=()
     
     [[ -z "${API_HOST:-}" ]] && missing_vars+=("API_HOST")
@@ -42,44 +37,44 @@ check_required_env() {
     [[ -z "${CORE_TYPE:-}" ]] && missing_vars+=("CORE_TYPE")
     
     if [[ ${#missing_vars[@]} -gt 0 ]]; then
-        echo -e "${red}错误：缺少必需的环境变量：${missing_vars[*]}${plain}"
-        echo -e "${yellow}必需的环境变量：${plain}"
+        echo "ERROR: Missing required environment variables: ${missing_vars[*]}"
+        echo "Required environment variables:"
         echo "  API_HOST      - API 服务器地址"
         echo "  API_KEY       - API 密钥"
         echo "  NODE_ID       - 节点 ID（数字）"
         echo "  CORE_TYPE     - 核心类型（xray, sing, hysteria2）"
         echo ""
-        echo -e "${yellow}使用示例：${plain}"
+        echo "Usage example:"
         echo "  export API_HOST=\"api.example.com\""
         echo "  export API_KEY=\"your-api-key\""
         echo "  export NODE_ID=\"1\""
         echo "  export CORE_TYPE=\"sing\""
         exit 1
     fi
-    echo -e "${green}✓ 环境变量检查通过${plain}"
+    echo "[OK] Environment variables check passed"
 }
 
 # 检查root权限
 check_root() {
-    echo -e "${yellow}[1/5] 检查root权限...${plain}"
+    echo "[1/5] Checking root privileges..."
     if [[ $EUID -ne 0 ]]; then
-        echo -e "${red}错误：必须使用root用户运行此脚本！${plain}"
-        echo -e "${yellow}当前用户ID: $EUID (需要: 0)${plain}"
-        echo -e "${yellow}提示: 请使用 sudo bash auto-install.sh 运行${plain}"
+        echo "ERROR: This script must be run as root user!"
+        echo "Current user ID: $EUID (required: 0)"
+        echo "Hint: Please run with sudo bash auto-install.sh"
         exit 1
     fi
-    echo -e "${green}✓ Root权限检查通过${plain}"
+    echo "[OK] Root privileges check passed"
 }
 
 # 检查系统类型
 check_system() {
-    echo -e "${yellow}[3/5] 检查系统类型...${plain}"
+    echo "[3/5] Checking system type..."
     
     # 检查关键系统文件是否存在
     if [[ ! -f /etc/issue && ! -f /proc/version ]]; then
-        echo -e "${red}错误：未检测到Linux系统文件 (/etc/issue 或 /proc/version)${plain}"
-        echo -e "${yellow}提示：此脚本必须在Linux系统中运行 (如 Ubuntu, Debian, CentOS)${plain}"
-        echo -e "${yellow}如果您在Windows上，请使用WSL (Windows Subsystem for Linux)${plain}"
+        echo "ERROR: Linux system files not detected (/etc/issue or /proc/version)"
+        echo "Hint: This script must be run on a Linux system (e.g., Ubuntu, Debian, CentOS)"
+        echo "If you are on Windows, please use WSL (Windows Subsystem for Linux)"
         exit 1
     fi
     
@@ -107,25 +102,25 @@ check_system() {
     fi
     
     if [[ -z "$release" ]]; then
-        echo -e "${red}错误：未检测到支持的系统版本${plain}"
-        echo -e "${yellow}支持的系统：Ubuntu, Debian, CentOS, Alpine, Arch Linux${plain}"
+        echo "ERROR: Unsupported system version not detected"
+        echo "Supported systems: Ubuntu, Debian, CentOS, Alpine, Arch Linux"
         if [[ -f /etc/issue ]]; then
-            echo -e "${yellow}当前系统信息 (/etc/issue):${plain}"
+            echo "Current system information (/etc/issue):"
             cat /etc/issue 2>/dev/null || true
         fi
         if [[ -f /proc/version ]]; then
-            echo -e "${yellow}当前系统信息 (/proc/version):${plain}"
+            echo "Current system information (/proc/version):"
             cat /proc/version 2>/dev/null || true
         fi
         exit 1
     fi
     
-    echo -e "${green}✓ 系统类型：${release}${plain}"
+    echo "[OK] System type: ${release}"
 }
 
 # 检查架构
 check_arch() {
-    echo -e "${yellow}[4/5] 检查系统架构...${plain}"
+    echo "[4/5] Checking system architecture..."
     local raw_arch=$(uname -m)
     
     if [[ $raw_arch == "x86_64" || $raw_arch == "x64" || $raw_arch == "amd64" ]]; then
@@ -138,12 +133,12 @@ check_arch() {
         arch="64"
     fi
     
-    echo -e "${green}✓ 系统架构：${raw_arch} -> ${arch}${plain}"
+    echo "[OK] System architecture: ${raw_arch} -> ${arch}"
 }
 
 # 初始化变量
 init_variables() {
-    echo -e "${yellow}[5/5] 初始化配置变量...${plain}"
+    echo "[5/5] Initializing configuration variables..."
     cur_dir=$(pwd)
     
     # 默认值
@@ -162,13 +157,13 @@ init_variables() {
     CERT_MODE="${CERT_MODE:-none}"
     CERT_DOMAIN="${CERT_DOMAIN:-example.com}"
     
-    echo -e "${green}✓ 配置变量初始化完成${plain}"
+    echo "[OK] Configuration variables initialization complete"
 }
 
 # 卸载现有的ad2nx（如果存在）
 uninstall_if_exists() {
     if [[ -f /usr/local/ad2nx/ad2nx ]]; then
-        echo -e "${yellow}检测到已安装的 ad2nx，正在卸载...${plain}"
+        echo "Detected installed ad2nx, uninstalling..."
         
         if [[ x"${release}" == x"alpine" ]]; then
             service ad2nx stop 2>/dev/null || true
@@ -184,8 +179,9 @@ uninstall_if_exists() {
         
         rm /usr/local/ad2nx -rf
         rm /usr/bin/ad2nx -f 2>/dev/null || true
+        rm /etc/ad2nx -rf
         
-        echo -e "${green}卸载完成${plain}"
+        echo "Uninstall complete"
     fi
 }
 
@@ -273,7 +269,7 @@ github_release_download_zip() {
 
 # 安装基础依赖
 install_base() {
-    echo -e "${green}正在安装基础依赖...${plain}"
+    echo "Installing base dependencies..."
     
     if [[ x"${release}" == x"centos" ]]; then
         yum install epel-release wget curl unzip tar crontabs socat ca-certificates -y >/dev/null 2>&1
@@ -296,7 +292,7 @@ install_base() {
         pacman -S --noconfirm --needed ca-certificates wget >/dev/null 2>&1
     fi
     
-    echo -e "${green}基础依赖安装完成${plain}"
+    echo "Base dependencies installation complete"
 }
 
 # 检查IPv6支持
@@ -310,7 +306,7 @@ check_ipv6_support() {
 
 # 生成配置文件
 generate_config_file() {
-    echo -e "${green}正在生成完整配置文件...${plain}"
+    echo "Generating complete configuration file..."
     
     if [[ ! -d /etc/ad2nx ]]; then
         mkdir -p /etc/ad2nx
@@ -557,12 +553,12 @@ masquerade:
   type: 404
 HY2EOF
     
-    echo -e "${green}配置文件生成完成${plain}"
+    echo "Configuration file generation complete"
 }
 
 # 安装ad2nx
 install_ad2nx() {
-    echo -e "${green}正在安装ad2nx...${plain}"
+    echo "Installing ad2nx..."
     
     # 检查并卸载现有版本
     uninstall_if_exists
@@ -571,37 +567,37 @@ install_ad2nx() {
     cd /usr/local/ad2nx/
 
     # 获取最新版本
-    echo -e "${yellow}正在获取最新版本信息...${plain}"
+    echo "Fetching latest version information..."
     local release_info=$(github_api_get "${GITHUB_API_BASE}/repos/${RELEASE_REPO}/releases/latest")
     
     if [[ -z "$release_info" ]]; then
-        echo -e "${red}获取版本信息失败：无法连接到 GitHub API${plain}"
-        echo -e "${yellow}请检查网络连接或 GitHub API 访问${plain}"
+        echo "ERROR: Failed to fetch version information: Cannot connect to GitHub API"
+        echo "Please check network connection or GitHub API access"
         exit 1
     fi
     
     local last_version=$(echo "$release_info" | grep '"tag_name":' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
     
     if [[ -z "$last_version" ]]; then
-        echo -e "${red}获取版本失败：无法解析版本号${plain}"
-        echo -e "${yellow}API 响应:${plain}"
+        echo "ERROR: Failed to get version: Cannot parse version number"
+        echo "API response:"
         echo "$release_info" | head -n 20
         exit 1
     fi
     
-    echo -e "${green}检测到最新版本：${last_version}${plain}"
+    echo "Detected latest version: ${last_version}"
     
-    echo -e "${yellow}正在下载 ad2nx...${plain}"
+    echo "Downloading ad2nx..."
     github_release_download_zip "${last_version}" "/usr/local/ad2nx/ad2nx-linux.zip"
     
     if [[ $? -ne 0 ]]; then
-        echo -e "${red}下载ad2nx失败${plain}"
+        echo "ERROR: Failed to download ad2nx"
         exit 1
     fi
 
     unzip ad2nx-linux.zip >/dev/null 2>&1
     if [[ $? -ne 0 ]]; then
-        echo -e "${red}解压失败${plain}"
+        echo "ERROR: Extraction failed"
         exit 1
     fi
 
@@ -679,22 +675,22 @@ SYSTEMD
 
     cd "$cur_dir"
     
-    echo -e "${green}ad2nx 安装完成${plain}"
+    echo "ad2nx installation complete"
 }
 
 # 启动服务
 start_service() {
-    echo -e "${green}正在启动服务...${plain}"
+    echo "Starting service..."
     
     if [[ x"${release}" == x"alpine" ]]; then
         service ad2nx start || {
-            echo -e "${red}服务启动失败${plain}"
+            echo "ERROR: Service startup failed"
             return 1
         }
     else
-        systemctl enable ad2nx || echo -e "${yellow}警告: 无法设置开机自启${plain}"
+        systemctl enable ad2nx || echo "WARNING: Unable to set auto-start on boot"
         systemctl start ad2nx || {
-            echo -e "${red}服务启动失败${plain}"
+            echo "ERROR: Service startup failed"
             return 1
         }
     fi
@@ -703,24 +699,24 @@ start_service() {
     
     if [[ x"${release}" == x"alpine" ]]; then
         if service ad2nx status 2>/dev/null | grep -q "started"; then
-            echo -e "${green}服务启动成功${plain}"
+            echo "Service startup successful"
             return 0
         fi
     else
         if systemctl is-active --quiet ad2nx 2>/dev/null; then
-            echo -e "${green}服务启动成功${plain}"
+            echo "Service startup successful"
             return 0
         fi
     fi
     
-    echo -e "${yellow}服务启动可能失败，请使用 ad2nx log 查看日志${plain}"
+    echo "Service startup may have failed. Please use 'ad2nx log' to check logs"
     return 1
 }
 
 # 主流程
 main() {
-    echo -e "${green}========== ad2nx 自动安装脚本 ==========${plain}"
-    echo -e "${yellow}正在进行环境检查...${plain}"
+    echo "========= ad2nx Auto-installation Script ========="
+    echo "Performing environment checks..."
     echo ""
     
     check_root
@@ -729,13 +725,13 @@ main() {
     check_system
     check_arch
     
-    echo -e "${green}========== 开始自动安装流程 ==========${plain}"
-    echo -e "${green}API_HOST: ${API_HOST}${plain}"
-    echo -e "${green}NODE_ID: ${NODE_ID}${plain}"
-    echo -e "${green}CORE_TYPE: ${CORE_TYPE}${plain}"
-    echo -e "${green}NODE_TYPE: ${NODE_TYPE}${plain}"
-    echo -e "${green}IF_REGISTER: ${IF_REGISTER}${plain}"
-    echo -e "${green}IF_GENERATE: ${IF_GENERATE}${plain}"
+    echo "========= Starting auto-installation process ========="
+    echo "API_HOST: ${API_HOST}"
+    echo "NODE_ID: ${NODE_ID}"
+    echo "CORE_TYPE: ${CORE_TYPE}"
+    echo "NODE_TYPE: ${NODE_TYPE}"
+    echo "IF_REGISTER: ${IF_REGISTER}"
+    echo "IF_GENERATE: ${IF_GENERATE}"
     echo ""
     
     install_base
@@ -747,13 +743,13 @@ main() {
     
     start_service
     
-    echo -e ""
-    echo -e "${green}========== 安装完成 ==========${plain}"
-    echo -e "${green}管理命令：ad2nx${plain}"
-    echo -e "${green}查看日志：ad2nx log${plain}"
-    echo -e "${green}重启服务：ad2nx restart${plain}"
-    echo -e "${green}配置文件：/etc/ad2nx/config.json${plain}"
-    echo -e "${green}========================================${plain}"
+    echo ""
+    echo "========= Installation Complete ========="
+    echo "Management command: ad2nx"
+    echo "View logs: ad2nx log"
+    echo "Restart service: ad2nx restart"
+    echo "Configuration file: /etc/ad2nx/config.json"
+    echo "========================================"
 }
 
 main
