@@ -156,7 +156,14 @@ init_variables() {
     # 证书配置
     CERT_MODE="${CERT_MODE:-none}"
     CERT_DOMAIN="${CERT_DOMAIN:-example.com}"
+    CERT_PROVIDER="${CERT_PROVIDER:-godaddy}"
+    CERT_EMAIL="${CERT_EMAIL:-demo@test.com}"
     
+    CERT_GODADDY_API_KEY="${CERT_GODADDY_API_KEY:-}"
+    CERT_GODADDY_API_SECRET="${CERT_GODADDY_API_SECRET:-}"
+
+    CERT_CF_DNS_API_TOKEN="${CERT_CF_DNS_API_TOKEN:-}"
+
     echo "[OK] Configuration variables initialization complete"
 }
 
@@ -317,6 +324,15 @@ generate_config_file() {
     [[ $ipv6_support -eq 1 ]] && listen_ip="::"
     
     # 生成节点配置（根据核心类型）
+    # 生成 DNSEnv 内容
+    local dsn_env_json=""
+    if [[ "$CERT_PROVIDER" == "godaddy" ]]; then
+        dsn_env_json=\"\\\"GODADDY_API_KEY\\\": \\\"$CERT_GODADDY_API_KEY\\\", \\\"GODADDY_API_SECRET\\\": \\\"$CERT_GODADDY_API_SECRET\\\"\"
+    elif [[ "$CERT_PROVIDER" == "cloudflare" ]]; then
+        dsn_env_json=\"\\\"CF_DNS_API_TOKEN\\\": \\\"$CERT_CF_DNS_API_TOKEN\\\"\"
+    else
+        dsn_env_json=\"\\\"EnvName\\\": \\\"env1\\\"\"
+    fi
     local node_config=""
     if [ "$CORE_TYPE" == "xray" ]; then 
         node_config="{
@@ -340,9 +356,9 @@ generate_config_file() {
                 \"CertDomain\": \"$CERT_DOMAIN\",
                 \"CertFile\": \"/etc/ad2nx/fullchain.cer\",
                 \"KeyFile\": \"/etc/ad2nx/cert.key\",
-                \"Email\": \"ad2nx@github.com\",
-                \"Provider\": \"cloudflare\",
-                \"DNSEnv\": {\"EnvName\": \"env1\"}
+                \"Email\": \"$CERT_EMAIL\",
+                \"Provider\": \"$CERT_PROVIDER\",
+                \"DNSEnv\": {${dsn_env_json}}
             }
         }"
     elif [ "$CORE_TYPE" == "sing" ]; then
@@ -365,9 +381,9 @@ generate_config_file() {
                 \"CertDomain\": \"$CERT_DOMAIN\",
                 \"CertFile\": \"/etc/ad2nx/fullchain.cer\",
                 \"KeyFile\": \"/etc/ad2nx/cert.key\",
-                \"Email\": \"ad2nx@github.com\",
-                \"Provider\": \"cloudflare\",
-                \"DNSEnv\": {\"EnvName\": \"env1\"}
+                \"Email\": \"$CERT_EMAIL\",
+                \"Provider\": \"$CERT_PROVIDER\",
+                \"DNSEnv\": {${dsn_env_json}}
             }
         }"
     elif [ "$CORE_TYPE" == "hysteria2" ]; then
@@ -379,7 +395,7 @@ generate_config_file() {
             \"NodeType\": \"$NODE_TYPE\",
             \"Hysteria2ConfigPath\": \"/etc/ad2nx/hy2config.yaml\",
             \"Timeout\": 30,
-            \"ListenIP\": \"\",
+            \"ListenIP\": \"0.0.0.0\",
             \"SendIP\": \"0.0.0.0\",
             \"DeviceOnlineMinTraffic\": 200,
             \"MinReportTraffic\": 0,
@@ -389,9 +405,9 @@ generate_config_file() {
                 \"CertDomain\": \"$CERT_DOMAIN\",
                 \"CertFile\": \"/etc/ad2nx/fullchain.cer\",
                 \"KeyFile\": \"/etc/ad2nx/cert.key\",
-                \"Email\": \"ad2nx@github.com\",
-                \"Provider\": \"cloudflare\",
-                \"DNSEnv\": {\"EnvName\": \"env1\"}
+                \"Email\": \"$CERT_EMAIL\",
+                \"Provider\": \"$CERT_PROVIDER\",
+                \"DNSEnv\": {${dsn_env_json}}
             }
         }"
     fi
