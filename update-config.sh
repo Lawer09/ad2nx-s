@@ -96,11 +96,11 @@ generate_new_config() {
     # 生成 DNSEnv 内容
     local dsn_env_json=""
     if [[ "$CERT_PROVIDER" == "godaddy" ]]; then
-        dsn_env_json="\\\"GODADDY_API_KEY\\\": \\\"$CERT_GODADDY_API_KEY\\\", \\\"GODADDY_API_SECRET\\\": \\\"$CERT_GODADDY_API_SECRET\\\""
+        dsn_env_json="\"GODADDY_API_KEY\": \"$CERT_GODADDY_API_KEY\", \"GODADDY_API_SECRET\": \"$CERT_GODADDY_API_SECRET\""
     elif [[ "$CERT_PROVIDER" == "cloudflare" ]]; then
-        dsn_env_json="\\\"CF_DNS_API_TOKEN\\\": \\\"$CERT_CF_DNS_API_TOKEN\\\""
+        dsn_env_json="\"CF_DNS_API_TOKEN\": \"$CERT_CF_DNS_API_TOKEN\""
     else
-        dsn_env_json="\\\"EnvName\\\": \\\"env1\\\""
+        dsn_env_json="\"EnvName\": \"env1\""
     fi
     
     # 生成节点配置
