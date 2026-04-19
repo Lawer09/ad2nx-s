@@ -46,28 +46,6 @@ EXTRACTED_DIR_NAME="linux-${ARCH}"
 
 mkdir -p "$RELEASES_DIR" "$SCRIPT_DIR" "$RUN_DIR" "$LOG_DIR" "$TMP_DIR" "$CONFIG_DIR"
 
-api_headers_common() {
-  cat <<EOF
--H
-Accept: application/vnd.github+json
--H
-Authorization: Bearer ${GITHUB_TOKEN}
--H
-X-GitHub-Api-Version: ${GITHUB_API_VERSION}
-EOF
-}
-
-asset_headers_download() {
-  cat <<EOF
--H
-Accept: application/octet-stream
--H
-Authorization: Bearer ${GITHUB_TOKEN}
--H
-X-GitHub-Api-Version: ${GITHUB_API_VERSION}
-EOF
-}
-
 get_release_metadata() {
   local url
   if [ "$RELEASE_TAG" = "latest" ]; then
@@ -84,27 +62,37 @@ get_release_metadata() {
 }
 
 get_asset_id_by_name() {
-  local release_json="$1"
+  local json_file="$1"
   local asset_name="$2"
 
-  python3 - "$asset_name" <<'PY'
+  python3 - "$json_file" "$asset_name" <<'PY'
 import json, sys
-asset_name = sys.argv[1]
-data = json.load(sys.stdin)
-assets = data.get("assets", [])
-for a in assets:
-    if a.get("name") == asset_name:
-        print(a.get("id"))
+
+json_file = sys.argv[1]
+asset_name = sys.argv[2]
+
+with open(json_file, "r", encoding="utf-8") as f:
+    data = json.load(f)
+
+for asset in data.get("assets", []):
+    if asset.get("name") == asset_name:
+        print(asset.get("id"))
         sys.exit(0)
+
 sys.exit(1)
 PY
 }
 
 get_release_tag_name() {
-  local release_json="$1"
-  python3 <<'PY'
+  local json_file="$1"
+
+  python3 - "$json_file" <<'PY'
 import json, sys
-data = json.load(sys.stdin)
+
+json_file = sys.argv[1]
+with open(json_file, "r", encoding="utf-8") as f:
+    data = json.load(f)
+
 print(data.get("tag_name", "unknown"))
 PY
 }
@@ -222,34 +210,14 @@ TARBALL_PATH="${TMP_DIR}/${ASSET_NAME}"
 log "fetching release metadata"
 get_release_metadata > "${RELEASE_JSON_PATH}"
 
-ASSET_ID="$(cat "${RELEASE_JSON_PATH}" | get_asset_id_by_name /dev/stdin "${ASSET_NAME}" 2>/dev/null || true)"
-if [ -z "${ASSET_ID}" ]; then
-  # 兼容 shell 管道方式
-  ASSET_ID="$(python3 - "${ASSET_NAME}" < "${RELEASE_JSON_PATH}" <<'PY'
-import json, sys
-asset_name = sys.argv[1]
-data = json.load(sys.stdin)
-for a in data.get("assets", []):
-    if a.get("name") == asset_name:
-        print(a.get("id"))
-        break
-PY
-)"
-fi
-
+ASSET_ID="$(get_asset_id_by_name "${RELEASE_JSON_PATH}" "${ASSET_NAME}" || true)"
 [ -n "${ASSET_ID}" ] || err "asset not found in release: ${ASSET_NAME}"
 
-RELEASE_DIR_BASENAME="$(
-python3 < "${RELEASE_JSON_PATH}" <<'PY'
-import json, sys, datetime
-data = json.load(sys.stdin)
-tag = data.get("tag_name")
-if tag:
-    print(tag)
-else:
-    print("latest-" + datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S"))
-PY
-)"
+RELEASE_DIR_BASENAME="$(get_release_tag_name "${RELEASE_JSON_PATH}")"
+if [ -z "${RELEASE_DIR_BASENAME}" ] || [ "${RELEASE_DIR_BASENAME}" = "unknown" ]; then
+  RELEASE_DIR_BASENAME="$(date +"latest-%Y%m%d-%H%M%S")"
+fi
+
 TARGET_RELEASE_DIR="${RELEASES_DIR}/${RELEASE_DIR_BASENAME}"
 
 download_release_asset "${ASSET_ID}" "${TARBALL_PATH}"
