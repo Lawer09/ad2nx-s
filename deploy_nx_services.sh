@@ -17,9 +17,80 @@ require_cmd() {
   command -v "$name" >/dev/null 2>&1 || err "missing command: ${name}"
 }
 
+install_redis_if_missing() {
+  if command -v redis-server >/dev/null 2>&1 || command -v redis-cli >/dev/null 2>&1; then
+    log "redis already installed"
+    return 0
+  fi
+
+  log "redis not found, installing..."
+
+  if [ -f /etc/debian_version ]; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -y
+    apt-get install -y redis-server
+  elif [ -f /etc/redhat-release ]; then
+    if command -v dnf >/dev/null 2>&1; then
+      dnf install -y redis || dnf install -y redis6 || err "failed to install redis via dnf"
+    elif command -v yum >/dev/null 2>&1; then
+      yum install -y redis || yum install -y redis6 || err "failed to install redis via yum"
+    else
+      err "unsupported redhat-like package manager"
+    fi
+  else
+    err "unsupported OS, cannot auto install redis"
+  fi
+
+  log "redis installed"
+}
+
+enable_and_start_redis() {
+  local svc=""
+
+  if systemctl list-unit-files 2>/dev/null | grep -q '^redis-server\.service'; then
+    svc="redis-server"
+  elif systemctl list-unit-files 2>/dev/null | grep -q '^redis\.service'; then
+    svc="redis"
+  else
+    # 尝试常见名字
+    if systemctl status redis-server >/dev/null 2>&1; then
+      svc="redis-server"
+    elif systemctl status redis >/dev/null 2>&1; then
+      svc="redis"
+    fi
+  fi
+
+  [ -n "$svc" ] || err "redis service not found after install"
+
+  systemctl enable "$svc" >/dev/null 2>&1 || true
+  systemctl restart "$svc"
+
+  sleep 1
+  systemctl is-active --quiet "$svc" || err "redis service failed to start: $svc"
+
+  log "redis started: $svc"
+}
+
+check_redis_no_password_default() {
+  # 只做检查，不强制改已有配置
+  if command -v redis-cli >/dev/null 2>&1; then
+    if redis-cli ping >/dev/null 2>&1; then
+      log "redis ping ok (no password mode available)"
+      return 0
+    fi
+  fi
+
+  warn "redis installed but redis-cli ping failed without password"
+  warn "this may mean redis listens on non-default address/port, or existing password is configured"
+}
+
 require_cmd curl
 require_cmd tar
 require_cmd python3
+
+install_redis_if_missing
+enable_and_start_redis
+check_redis_no_password_default
 
 # ===== required env =====
 require_env GITHUB_OWNER
