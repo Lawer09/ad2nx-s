@@ -195,24 +195,44 @@ uninstall_if_exists() {
 # Github API 下载文件
 github_api_get() {
     local url="$1"
+    # 添加时间戳绕过缓存
+    local timestamp=$(date +%s)
+    local separator="?"
+    [[ "$url" == *"?"* ]] && separator="&"
+    
     if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-        curl -Ls -H "Authorization: Bearer ${GITHUB_TOKEN}" "${url}"
+        curl -Ls \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Cache-Control: no-cache, no-store, must-revalidate" \
+            -H "Pragma: no-cache" \
+            "${url}${separator}_t=${timestamp}"
     else
-        curl -Ls "${url}"
+        curl -Ls \
+            -H "Cache-Control: no-cache, no-store, must-revalidate" \
+            -H "Pragma: no-cache" \
+            "${url}${separator}_t=${timestamp}"
     fi
 }
 
 github_contents_download() {
     local file_path="$1"
     local output_path="$2"
+    local timestamp=$(date +%s)
+    
     if [[ -n "${GITHUB_TOKEN:-}" ]]; then
         curl -Ls \
             -H "Authorization: Bearer ${GITHUB_TOKEN}" \
             -H "Accept: application/vnd.github.raw" \
-            "${GITHUB_API_BASE}/repos/${SCRIPT_REPO}/contents/${file_path}?ref=${SCRIPT_BRANCH}" \
+            -H "Cache-Control: no-cache, no-store, must-revalidate" \
+            -H "Pragma: no-cache" \
+            "${GITHUB_API_BASE}/repos/${SCRIPT_REPO}/contents/${file_path}?ref=${SCRIPT_BRANCH}&_t=${timestamp}" \
             -o "${output_path}"
     else
-        curl -Ls "${GITHUB_RAW_BASE}/${SCRIPT_REPO}/${SCRIPT_BRANCH}/${file_path}" -o "${output_path}"
+        curl -Ls \
+            -H "Cache-Control: no-cache, no-store, must-revalidate" \
+            -H "Pragma: no-cache" \
+            "${GITHUB_RAW_BASE}/${SCRIPT_REPO}/${SCRIPT_BRANCH}/${file_path}?_t=${timestamp}" \
+            -o "${output_path}"
     fi
 }
 
@@ -255,17 +275,20 @@ github_release_download_zip() {
         curl -fL --retry 3 --retry-delay 1 \
             -H "Authorization: Bearer ${GITHUB_TOKEN}" \
             -H "Accept: application/octet-stream" \
+            -H "Cache-Control: no-cache, no-store, must-revalidate" \
+            -H "Pragma: no-cache" \
             "${asset_api_url}" \
             -o "${output_path}"
         return $?
     fi
 
-    # 无Token时使用wget
-    wget --no-check-certificate -N --progress=bar -O "${output_path}" \
-        "https://github.com/${RELEASE_REPO}/releases/download/${version_tag}/${asset_name}" 2>/dev/null || \
+    # 无Token时使用wget (添加时间戳绕过缓存)
+    local timestamp=$(date +%s)
+    wget --no-check-certificate --no-cache --progress=bar -O "${output_path}" \
+        "https://github.com/${RELEASE_REPO}/releases/download/${version_tag}/${asset_name}?_t=${timestamp}" 2>/dev/null || \
     {
-        wget --no-check-certificate -N --progress=bar -O "${output_path}" \
-            "https://github.com/${RELEASE_REPO}/releases/download/v${version_tag}/${asset_name}"
+        wget --no-check-certificate --no-cache --progress=bar -O "${output_path}" \
+            "https://github.com/${RELEASE_REPO}/releases/download/v${version_tag}/${asset_name}?_t=${timestamp}"
     }
 }
 
