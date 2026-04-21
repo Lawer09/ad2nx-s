@@ -124,13 +124,13 @@ check_arch() {
     local raw_arch=$(uname -m)
     
     if [[ $raw_arch == "x86_64" || $raw_arch == "x64" || $raw_arch == "amd64" ]]; then
-        arch="64"
+        arch="amd64"
     elif [[ $raw_arch == "aarch64" || $raw_arch == "arm64" ]]; then
         arch="arm64-v8a"
     elif [[ $raw_arch == "s390x" ]]; then
         arch="s390x"
     else
-        arch="64"
+        arch="amd64"
     fi
     
     echo "[OK] System architecture: ${raw_arch} -> ${arch}"
@@ -264,13 +264,8 @@ github_release_download_zip() {
     wget --no-check-certificate -N --progress=bar -O "${output_path}" \
         "https://github.com/${RELEASE_REPO}/releases/download/${version_tag}/${asset_name}" 2>/dev/null || \
     {
-        if [[ "${version_tag}" != v* ]]; then
-            wget --no-check-certificate -N --progress=bar -O "${output_path}" \
-                "https://github.com/${RELEASE_REPO}/releases/download/v${version_tag}/${asset_name}"
-        else
-            wget --no-check-certificate -N --progress=bar -O "${output_path}" \
-                "https://github.com/${RELEASE_REPO}/releases/download/${version_tag#v}/${asset_name}"
-        fi
+        wget --no-check-certificate -N --progress=bar -O "${output_path}" \
+            "https://github.com/${RELEASE_REPO}/releases/download/v${version_tag}/${asset_name}"
     }
 }
 
