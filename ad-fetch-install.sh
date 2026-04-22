@@ -9,7 +9,7 @@ CONF_DIR="/etc/${APP_NAME}"
 SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
 
 # ====== 必填：根据你的实际情况修改 ======
-OWNER="${OWNER:Lawer09}"
+OWNER="${OWNER:-Lawer09}"
 REPO="${REPO:-ad-monetization-sync}"
 SERVER_ID="${SERVER_ID:-sync-node-01}"
 SERVER_NAME="${SERVER_NAME:-sync-node-01}"
