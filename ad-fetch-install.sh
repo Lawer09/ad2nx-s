@@ -13,7 +13,7 @@ OWNER="${OWNER:-Lawer09}"
 REPO="${REPO:-ad-monetization-sync}"
 SERVER_ID="${SERVER_ID:-sync-node-01}"
 SERVER_NAME="${SERVER_NAME:-sync-node-01}"
-SERVER_HOST_IP="${SERVER_HOST_IP:-47.87.139.70}"
+SERVER_HOST_IP="${SERVER_HOST_IP:-10.0.0.1}"
 
 MYSQL_HOST="${MYSQL_HOST:-db.example.com}"
 MYSQL_PORT="${MYSQL_PORT:-3306}"
@@ -41,6 +41,8 @@ ADMOB_API_BASE_URL="${ADMOB_API_BASE_URL:-https://admob.googleapis.com/v1}"
 
 # 私有仓库时填写；公有仓库可留空
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
+# 指定发布版本（可选）。例如：v1.0.1；为空则使用 latest
+RELEASE_TAG="${RELEASE_TAG:-}"
 # ======================================
 
 install_packages_apt() {
@@ -146,7 +148,14 @@ EOF
 
 download_and_deploy_latest_release() {
   detect_arch
-  local api_url="https://api.github.com/repos/${OWNER}/${REPO}/releases/latest"
+
+  local api_url
+  if [ -n "${RELEASE_TAG}" ]; then
+    api_url="https://api.github.com/repos/${OWNER}/${REPO}/releases/tags/${RELEASE_TAG}"
+  else
+    api_url="https://api.github.com/repos/${OWNER}/${REPO}/releases/latest"
+  fi
+
   local tmp_dir
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "${tmp_dir}"' EXIT
@@ -156,9 +165,10 @@ download_and_deploy_latest_release() {
     auth_header=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
   fi
 
-  echo "query latest release..."
+  echo "query release..."
   curl -fsSL \
     -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
     "${auth_header[@]}" \
     "${api_url}" \
     > "${tmp_dir}/release.json"
@@ -166,16 +176,21 @@ download_and_deploy_latest_release() {
   local tag_name
   tag_name="$(jq -r '.tag_name' "${tmp_dir}/release.json")"
   if [ -z "${tag_name}" ] || [ "${tag_name}" = "null" ]; then
-    echo "failed to get latest release tag"
+    echo "failed to get release tag"
+    cat "${tmp_dir}/release.json"
     exit 1
   fi
 
   local asset_name="${APP_NAME}_linux_${ARCH}.tar.gz"
-  local download_url
-  download_url="$(jq -r --arg NAME "${asset_name}" '.assets[] | select(.name == $NAME) | .browser_download_url' "${tmp_dir}/release.json")"
 
-  if [ -z "${download_url}" ] || [ "${download_url}" = "null" ]; then
+  # 用 GitHub API 的资产 URL，不用 browser_download_url
+  local asset_api_url
+  asset_api_url="$(jq -r --arg NAME "${asset_name}" '.assets[] | select(.name == $NAME) | .url' "${tmp_dir}/release.json")"
+
+  if [ -z "${asset_api_url}" ] || [ "${asset_api_url}" = "null" ]; then
     echo "release asset not found: ${asset_name}"
+    echo "available assets:"
+    jq -r '.assets[].name' "${tmp_dir}/release.json" || true
     exit 1
   fi
 
@@ -184,9 +199,10 @@ download_and_deploy_latest_release() {
 
   echo "download ${asset_name} from ${tag_name}..."
   curl -fL \
-    "${auth_header[@]}" \
     -H "Accept: application/octet-stream" \
-    "${download_url}" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    "${auth_header[@]}" \
+    "${asset_api_url}" \
     -o "${tmp_dir}/${asset_name}"
 
   tar -xzf "${tmp_dir}/${asset_name}" -C "${release_dir}"
