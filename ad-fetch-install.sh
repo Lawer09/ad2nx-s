@@ -149,6 +149,20 @@ EOF
 download_and_deploy_latest_release() {
   detect_arch
 
+  if systemctl is-active --quiet "${APP_NAME}"; then
+    echo "stop existing service..."
+    systemctl stop "${APP_NAME}"
+  fi
+
+  if [ -d "${INSTALL_DIR}/releases" ]; then
+    echo "remove old releases..."
+    rm -rf "${INSTALL_DIR}/releases"/*
+  fi
+
+  if [ -L "${INSTALL_DIR}/current" ] || [ -e "${INSTALL_DIR}/current" ]; then
+    rm -rf "${INSTALL_DIR}/current"
+  fi
+
   local api_url
   if [ -n "${RELEASE_TAG}" ]; then
     api_url="https://api.github.com/repos/${OWNER}/${REPO}/releases/tags/${RELEASE_TAG}"
