@@ -5,8 +5,7 @@ log() {
   echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*"
 }
 
-OWNER="your-org"
-REPO="${OWNER}/traffic-platform-sync"
+REPO="${OWNER:-Lawer09}/traffic-platform-sync"
 APP_NAME="traffic-platform-sync"
 INSTALL_DIR="/opt/${APP_NAME}"
 CONFIG_DIR="/etc/${APP_NAME}"
@@ -38,8 +37,24 @@ cd /tmp
 
 if [ "${VERSION}" = "latest" ]; then
   log "query latest release"
-  DOWNLOAD_URL=$(curl -s "${CURL_AUTH[@]}" "https://api.github.com/repos/${REPO}/releases/latest" \
-    | grep "browser_download_url" \
+  API_URL="https://api.github.com/repos/${REPO}/releases/latest"
+  API_TMP="/tmp/${APP_NAME}-release.json"
+  API_ERR="/tmp/${APP_NAME}-release.err"
+  HTTP_CODE=$(curl -sS -L \
+    --connect-timeout 10 --max-time 20 \
+    -w "%{http_code}" \
+    -o "${API_TMP}" \
+    "${CURL_AUTH[@]}" "${API_URL}" 2>"${API_ERR}" || true)
+
+  if [ "${HTTP_CODE}" != "200" ]; then
+    log "GitHub API failed (status=${HTTP_CODE})"
+    log "API url: ${API_URL}"
+    log "error: $(tail -n 2 "${API_ERR}" 2>/dev/null || true)"
+    log "response: $(head -n 5 "${API_TMP}" 2>/dev/null || true)"
+    exit 1
+  fi
+
+  DOWNLOAD_URL=$(grep "browser_download_url" "${API_TMP}" \
     | grep "${ARCH}.tar.gz" \
     | cut -d '"' -f 4)
 else
