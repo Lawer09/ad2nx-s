@@ -198,7 +198,7 @@ download_and_deploy_latest_release() {
 
   local asset_name="${APP_NAME}_linux_${ARCH}.tar.gz"
 
-  # 用 GitHub API 的资产 URL，不用 browser_download_url
+  # 用 GitHub API 的资产 URL
   local asset_api_url
   asset_api_url="$(jq -r --arg NAME "${asset_name}" '.assets[] | select(.name == $NAME) | .url' "${tmp_dir}/release.json")"
 
