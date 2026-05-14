@@ -188,7 +188,7 @@ download_and_deploy_latest_release() {
     auth_header=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
   fi
 
-  echo "query release..."
+  echo "query release ${api_url}"
   curl -fsSL \
     -H "Accept: application/vnd.github+json" \
     -H "X-GitHub-Api-Version: 2022-11-28" \
