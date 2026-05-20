@@ -110,7 +110,7 @@ EOF_ENV
 write_service_file() {
   cat > "${SERVICE_FILE}" <<EOF_SERVICE
 [Unit]
-Description=NX DNS Multi Provider Service
+Description=NX DNS Service
 Wants=network-online.target
 After=network-online.target
 
