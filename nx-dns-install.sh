@@ -206,7 +206,34 @@ download_and_deploy_latest_release() {
       "${auth_header[@]}" \
       "${checksum_api_url}" \
       -o "${tmp_dir}/${checksum_name}"
-    (cd "${tmp_dir}" && sha256sum -c "${checksum_name}")
+    local expected_sha
+    expected_sha="$(awk -v n="${asset_name}" '
+      {
+        file=$2
+        sub(/^\*/, "", file)
+        sub(/^.*\//, "", file)
+        if (file == n) {
+          print $1
+          exit
+        }
+      }
+    ' "${tmp_dir}/${checksum_name}")"
+    if [ -z "${expected_sha}" ]; then
+      expected_sha="$(awk 'NR==1 {print $1}' "${tmp_dir}/${checksum_name}")"
+    fi
+    if [ -z "${expected_sha}" ]; then
+      echo "invalid checksum file: ${checksum_name}"
+      cat "${tmp_dir}/${checksum_name}" || true
+      exit 1
+    fi
+    local actual_sha
+    actual_sha="$(sha256sum "${tmp_dir}/${asset_name}" | awk '{print $1}')"
+    if [ "${expected_sha}" != "${actual_sha}" ]; then
+      echo "checksum mismatch for ${asset_name}"
+      echo "expected: ${expected_sha}"
+      echo "actual:   ${actual_sha}"
+      exit 1
+    fi
   fi
 
   local release_dir="${INSTALL_DIR}/releases/${tag_name}"
