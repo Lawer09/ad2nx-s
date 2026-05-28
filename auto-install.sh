@@ -404,6 +404,10 @@ generate_config_file() {
                 \"Email\": \"$CERT_EMAIL\",
                 \"Provider\": \"$CERT_PROVIDER\",
                 \"DNSEnv\": {${dsn_env_json}}
+            },
+            \"LimitConfig\": {
+                \"SpeedLimit\": ${NODE_RATE_LIMIT},
+                \"DeviceLimit\": ${NODE_DEVICE_LIMIT}
             }
         }"
     elif [ "$CORE_TYPE" == "hysteria2" ]; then
