@@ -152,7 +152,9 @@ init_variables() {
     NODE_INOUT_TYPE="${NODE_INOUT_TYPE:-stand}"
     NODE_TYPE="${NODE_TYPE:-vless}"  # 默认vless
     CORE_TYPE="${CORE_TYPE:-sing}"  # 默认sing-box
-    
+    NODE_RATE_LIMIT="${NODE_RATE_LIMIT:-0}" #速率全局限制 0表示不限制，单位Mbps
+    NODE_DEVICE_LIMIT="${NODE_DEVICE_LIMIT:-0}" #设备全局限制 0表示不限制
+
     # 证书配置
     CERT_MODE="${CERT_MODE:-none}"
     CERT_DOMAIN="${CERT_DOMAIN:-example.com}"
