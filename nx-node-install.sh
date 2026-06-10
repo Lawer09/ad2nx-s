@@ -45,6 +45,7 @@ install_deps() {
   command -v curl >/dev/null 2>&1 || missing+=("curl")
   command -v unzip >/dev/null 2>&1 || missing+=("unzip")
   command -v sed >/dev/null 2>&1 || missing+=("sed")
+  command -v awk >/dev/null 2>&1 || missing+=("gawk")
 
   if [ "${#missing[@]}" -eq 0 ]; then
     return
@@ -90,8 +91,34 @@ github_curl() {
   fi
 }
 
+github_api_curl() {
+  if [ -n "$GIT_TOKEN" ]; then
+    curl -fsSL \
+      -H "Authorization: Bearer ${GIT_TOKEN}" \
+      -H "Accept: application/vnd.github+json" \
+      "$@"
+  else
+    curl -fsSL -H "Accept: application/vnd.github+json" "$@"
+  fi
+}
+
+github_asset_download() {
+  local output="$1"
+  local url="$2"
+
+  if [ -n "$GIT_TOKEN" ]; then
+    curl -fL \
+      -H "Authorization: Bearer ${GIT_TOKEN}" \
+      -H "Accept: application/octet-stream" \
+      -o "$output" \
+      "$url"
+  else
+    curl -fL -o "$output" "$url"
+  fi
+}
+
 latest_release_json() {
-  github_curl "https://api.github.com/repos/${REPO}/releases/latest"
+  github_api_curl "https://api.github.com/repos/${REPO}/releases/latest"
 }
 
 json_value() {
@@ -102,18 +129,48 @@ json_value() {
 download_release() {
   local tmp_dir="$1"
   local asset="$2"
-  local release_json tag url
+  local release_json tag asset_api_url browser_url
 
   info "Fetching latest release metadata from ${REPO}"
   release_json="$(latest_release_json)" || die "failed to fetch latest release metadata"
   tag="$(printf '%s' "$release_json" | json_value "tag_name")"
   [ -n "$tag" ] || die "failed to parse latest release tag"
 
-  url="$(printf '%s' "$release_json" | sed -n "s|.*\"browser_download_url\"[[:space:]]*:[[:space:]]*\"\\([^\"]*/${asset}\\)\".*|\\1|p" | head -n 1)"
-  [ -n "$url" ] || die "release ${tag} does not contain asset ${asset}"
+  asset_api_url="$(
+    printf '%s' "$release_json" | awk -v target="$asset" '
+      /"url"[[:space:]]*:/ && /\/releases\/assets\// {
+        line=$0
+        sub(/^.*"url"[[:space:]]*:[[:space:]]*"/, "", line)
+        sub(/".*$/, "", line)
+        url=line
+      }
+      /"name"[[:space:]]*:/ {
+        line=$0
+        sub(/^.*"name"[[:space:]]*:[[:space:]]*"/, "", line)
+        sub(/".*$/, "", line)
+        if (line == target && url != "") {
+          print url
+          exit
+        }
+      }
+    '
+  )"
+  browser_url="$(printf '%s' "$release_json" | sed -n "s|.*\"browser_download_url\"[[:space:]]*:[[:space:]]*\"\\([^\"]*/${asset}\\)\".*|\\1|p" | head -n 1)"
+
+  if [ -z "$asset_api_url" ] && [ -z "$browser_url" ]; then
+    die "release ${tag} does not contain asset ${asset}"
+  fi
 
   info "Downloading ${asset} from ${tag}"
-  github_curl -o "${tmp_dir}/${asset}" "$url" || die "failed to download ${asset}"
+  if [ -n "$asset_api_url" ]; then
+    github_asset_download "${tmp_dir}/${asset}" "$asset_api_url" || die "failed to download ${asset} through GitHub asset API"
+  else
+    github_curl -o "${tmp_dir}/${asset}" "$browser_url" || die "failed to download ${asset}"
+  fi
+
+  if ! unzip -tq "${tmp_dir}/${asset}" >/dev/null; then
+    die "downloaded ${asset} is not a valid zip; check GIT_TOKEN permission or release asset access"
+  fi
   unzip -q "${tmp_dir}/${asset}" -d "${tmp_dir}/package"
   [ -x "${tmp_dir}/package/${BINARY_NAME}" ] || chmod +x "${tmp_dir}/package/${BINARY_NAME}"
 }
