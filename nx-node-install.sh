@@ -154,12 +154,12 @@ write_generated_config() {
     "ID": "${agent_id}",
     "Secret": "${agent_secret}",
     "Server": "${panel_url}",
-    "SendIP": "",
+    "BindIP": "",
     "Timeout": 30
   },
   "Sync": {
-    "PullInterval": 30,
-    "ReportInterval": 30,
+    "PullInterval": 60,
+    "ReportInterval": 60,
     "FullSyncOnStart": true
   },
   "Core": {
@@ -176,7 +176,6 @@ write_generated_config() {
   },
   "Defaults": {
     "ListenIP": "0.0.0.0",
-    "SendIP": "0.0.0.0",
     "IPOnlineMinTraffic": 200,
     "ReportMinTraffic": 0,
     "EnableTFO": false,
