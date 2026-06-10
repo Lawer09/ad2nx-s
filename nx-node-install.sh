@@ -301,14 +301,16 @@ install_service() {
 [Unit]
 Description=nx-node manager
 Wants=network-online.target
-After=network-online.target
+After=network-online.target nss-lookup.target
 
 [Service]
+User=root
+Group=root
 Type=simple
 WorkingDirectory=${CONFIG_DIR}
 ExecStart=${INSTALL_DIR}/${BINARY_NAME} server -c ${CONFIG_FILE}
-Restart=on-failure
-RestartSec=5s
+Restart=always
+RestartSec=10s
 LimitNOFILE=1048576
 
 [Install]
