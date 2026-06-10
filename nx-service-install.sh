@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ENV_FILE="${ENV_FILE:-${1:-./scripts/install-from-release-linux.env}}"
+
+if [[ ! -f "$ENV_FILE" ]]; then
+  echo "env file not found: $ENV_FILE" >&2
+  exit 1
+fi
+
+set -a
+source "$ENV_FILE"
+set +a
+
 log() {
   printf '[install] %s\n' "$*" >&2
 }
@@ -81,6 +92,11 @@ ensure_base_dependencies() {
       dnf|yum) install_packages postgresql ;;
     esac
   fi
+
+  if use_github_api_download && ! command -v python3 >/dev/null 2>&1; then
+    log "installing python3 for GitHub release metadata parsing"
+    install_packages python3
+  fi
 }
 
 url_encode() {
@@ -133,6 +149,19 @@ normalize_repo_base_url() {
   else
     REPO_GIT_URL=""
   fi
+}
+
+is_github_dot_com_repo() {
+  [[ "${REPO_BASE_URL:-}" == https://github.com/* ]]
+}
+
+github_repo_slug() {
+  [[ -n "${REPO_BASE_URL:-}" ]] || fail "REPO_BASE_URL is empty"
+  printf '%s' "${REPO_BASE_URL#https://github.com/}"
+}
+
+use_github_api_download() {
+  [[ -n "${GITHUB_TOKEN:-}" ]] && is_github_dot_com_repo
 }
 
 service_release_version_override() {
@@ -235,6 +264,12 @@ service_release_url() {
   printf '%s/releases/download/%s/%s' "$REPO_BASE_URL" "$tag" "$asset"
 }
 
+service_release_asset_name() {
+  local service="$1"
+  local version="$2"
+  printf '%s-%s-%s-%s.tar.gz' "$service" "$version" "$RELEASE_TARGET_OS" "$RELEASE_TARGET_ARCH"
+}
+
 service_release_display_version() {
   local service="$1"
   local version
@@ -244,6 +279,16 @@ service_release_display_version() {
     return
   fi
   printf '%s' "$version"
+}
+
+service_release_download_mode() {
+  local service="$1"
+  local version="$2"
+  if [[ "$version" != "custom" ]] && [[ -z "$(service_release_url_override "$service")" ]] && use_github_api_download; then
+    printf '%s' "github-api"
+    return
+  fi
+  printf '%s' "direct-url"
 }
 
 prepare_release_workspace() {
@@ -281,14 +326,77 @@ download_file() {
   fi
 }
 
+github_api_get_release_asset_url() {
+  local tag="$1"
+  local asset_name="$2"
+  local slug api_url json asset_url
+  slug="$(github_repo_slug)"
+  api_url="https://api.github.com/repos/${slug}/releases/tags/$(url_encode "$tag")"
+  json="$(
+    curl -fsSL \
+      --retry 3 \
+      --retry-delay 2 \
+      --connect-timeout 15 \
+      -H "User-Agent: nx-platform-service-installer" \
+      -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+      -H "Accept: application/vnd.github+json" \
+      -H "X-GitHub-Api-Version: 2022-11-28" \
+      "$api_url"
+  )" || fail "failed to load GitHub release metadata: ${api_url}"
+
+  asset_url="$(
+    printf '%s' "$json" | python3 - "$asset_name" <<'PY'
+import json
+import sys
+
+asset_name = sys.argv[1]
+data = json.load(sys.stdin)
+for asset in data.get("assets", []):
+    if asset.get("name") == asset_name and asset.get("url"):
+        print(asset["url"])
+        sys.exit(0)
+sys.exit(1)
+PY
+  )" || fail "release asset not found in GitHub release: tag=${tag} asset=${asset_name}"
+
+  printf '%s' "$asset_url"
+}
+
+download_github_release_asset() {
+  local service="$1"
+  local version="$2"
+  local output="$3"
+  local tag asset_name asset_api_url
+  tag="${service}/${version}"
+  asset_name="$(service_release_asset_name "$service" "$version")"
+  asset_api_url="$(github_api_get_release_asset_url "$tag" "$asset_name")"
+
+  if ! curl -fsSL \
+    --retry 3 \
+    --retry-delay 2 \
+    --connect-timeout 15 \
+    -H "User-Agent: nx-platform-service-installer" \
+    -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+    -H "Accept: application/octet-stream" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    "$asset_api_url" -o "$output"; then
+    rm -f "$output"
+    fail "failed to download GitHub release asset via API: tag=${tag} asset=${asset_name}"
+  fi
+}
+
 download_release_archive() {
   local service="$1"
   local version="$2"
   local url="$3"
   local archive
-  archive="${RELEASE_WORK_DIR}/${service}-${version}-${RELEASE_TARGET_OS}-${RELEASE_TARGET_ARCH}.tar.gz"
+  archive="${RELEASE_WORK_DIR}/$(service_release_asset_name "$service" "$version")"
   log "downloading ${service} release ${version}"
-  download_file "$url" "$archive"
+  if [[ "$version" != "custom" ]] && [[ -z "$(service_release_url_override "$service")" ]] && use_github_api_download; then
+    download_github_release_asset "$service" "$version" "$archive"
+  else
+    download_file "$url" "$archive"
+  fi
   [[ -s "$archive" ]] || fail "downloaded archive is empty or missing: $archive"
   printf '%s' "$archive"
 }
@@ -618,11 +726,12 @@ main() {
 
   local service
   for service in $SERVICES; do
-    local version display_version url archive package_dir
+    local version display_version url mode archive package_dir
     version="$(service_release_version "$service")"
     display_version="$(service_release_display_version "$service")"
     url="$(service_release_url "$service" "$version")"
-    log "resolved ${service} release version=${display_version} url=${url}"
+    mode="$(service_release_download_mode "$service" "$version")"
+    log "resolved ${service} release version=${display_version} mode=${mode} url=${url}"
     archive="$(download_release_archive "$service" "$version" "$url")"
     package_dir="$(extract_release_archive "$service" "$archive")"
     install_service_artifacts "$service" "$package_dir"
