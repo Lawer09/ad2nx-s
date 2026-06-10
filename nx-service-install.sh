@@ -1,17 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ENV_FILE="${ENV_FILE:-${1:-./scripts/install-from-git-linux.env}}"
-
-if [[ ! -f "$ENV_FILE" ]]; then
-  echo "env file not found: $ENV_FILE" >&2
-  exit 1
-fi
-
-set -a
-source "$ENV_FILE"
-set +a
-
 log() {
   printf '[install] %s\n' "$*"
 }
@@ -72,6 +61,7 @@ install_packages() {
 
 ensure_base_dependencies() {
   local missing=()
+  command -v git >/dev/null 2>&1 || missing+=("git")
   command -v curl >/dev/null 2>&1 || missing+=("curl")
   command -v tar >/dev/null 2>&1 || missing+=("tar")
   command -v systemctl >/dev/null 2>&1 || fail "systemd is required"
@@ -107,12 +97,50 @@ url_encode() {
   printf '%s' "$encoded"
 }
 
-service_release_version() {
+normalize_repo_base_url() {
+  local raw="${RELEASE_REPO_URL:-}"
+  raw="${raw%.git}"
+  raw="${raw%/}"
+
+  case "$raw" in
+    https://*|http://*)
+      REPO_BASE_URL="$raw"
+      ;;
+    git@*:*/*)
+      local host path
+      host="${raw#git@}"
+      host="${host%%:*}"
+      path="${raw#*:}"
+      REPO_BASE_URL="https://${host}/${path}"
+      ;;
+    ssh://git@*/*)
+      local trimmed host path
+      trimmed="${raw#ssh://git@}"
+      host="${trimmed%%/*}"
+      path="${trimmed#*/}"
+      REPO_BASE_URL="https://${host}/${path}"
+      ;;
+    "")
+      REPO_BASE_URL=""
+      ;;
+    *)
+      fail "unsupported RELEASE_REPO_URL format: $RELEASE_REPO_URL"
+      ;;
+  esac
+
+  if [[ -n "$REPO_BASE_URL" ]]; then
+    REPO_GIT_URL="${REPO_BASE_URL}.git"
+  else
+    REPO_GIT_URL=""
+  fi
+}
+
+service_release_version_override() {
   local service="$1"
   case "$service" in
-    gateway-service) printf '%s' "$GATEWAY_RELEASE_VERSION" ;;
-    admin-service) printf '%s' "$ADMIN_RELEASE_VERSION" ;;
-    node-service) printf '%s' "$NODE_RELEASE_VERSION" ;;
+    gateway-service) printf '%s' "${GATEWAY_RELEASE_VERSION:-}" ;;
+    admin-service) printf '%s' "${ADMIN_RELEASE_VERSION:-}" ;;
+    node-service) printf '%s' "${NODE_RELEASE_VERSION:-}" ;;
     *) fail "unsupported service: $service" ;;
   esac
 }
@@ -127,6 +155,64 @@ service_release_url_override() {
   esac
 }
 
+load_remote_tags() {
+  if [[ "${REMOTE_TAGS_LOADED:-false}" == "true" ]]; then
+    return
+  fi
+  [[ -n "${REPO_GIT_URL:-}" ]] || fail "RELEASE_REPO_URL is required to resolve latest tags"
+
+  local -a git_args=(ls-remote --tags "$REPO_GIT_URL")
+  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    local auth_header
+    auth_header="Authorization: Basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')"
+    REMOTE_TAGS="$(git -c credential.helper= -c core.askPass= -c "http.extraHeader=${auth_header}" "${git_args[@]}")"
+  else
+    REMOTE_TAGS="$(git "${git_args[@]}")"
+  fi
+  REMOTE_TAGS_LOADED="true"
+}
+
+latest_service_version() {
+  local service="$1"
+  load_remote_tags
+
+  local version
+  version="$(
+    printf '%s\n' "$REMOTE_TAGS" \
+      | awk -v prefix="refs/tags/${service}/" '
+          {
+            ref = $2
+            sub(/\^\{\}$/, "", ref)
+            if (index(ref, prefix "v") == 1) {
+              sub(prefix, "", ref)
+              print ref
+            }
+          }
+        ' \
+      | sort -uV \
+      | tail -n1
+  )"
+
+  [[ -n "$version" ]] || fail "no release tag found for ${service} in ${RELEASE_REPO_URL}"
+  printf '%s' "$version"
+}
+
+service_release_version() {
+  local service="$1"
+  local version
+
+  version="$(service_release_version_override "$service")"
+  if [[ -n "$version" ]]; then
+    printf '%s' "$version"
+    return
+  fi
+  if [[ -n "${RELEASE_VERSION:-}" ]]; then
+    printf '%s' "$RELEASE_VERSION"
+    return
+  fi
+  latest_service_version "$service"
+}
+
 service_release_url() {
   local service="$1"
   local version="$2"
@@ -137,11 +223,11 @@ service_release_url() {
     return
   fi
 
-  local repo_url="${RELEASE_REPO_URL%.git}"
-  repo_url="${repo_url%/}"
-  local tag
+  [[ -n "${REPO_BASE_URL:-}" ]] || fail "RELEASE_REPO_URL is required when ${service} does not specify a direct release URL"
+  local tag asset
   tag="$(url_encode "${service}/${version}")"
-  printf '%s/releases/download/%s/%s-%s-linux-amd64.tar.gz' "$repo_url" "$tag" "$service" "$version"
+  asset="${service}-${version}-${RELEASE_TARGET_OS}-${RELEASE_TARGET_ARCH}.tar.gz"
+  printf '%s/releases/download/%s/%s' "$REPO_BASE_URL" "$tag" "$asset"
 }
 
 prepare_release_workspace() {
@@ -171,7 +257,7 @@ download_file() {
     -H "User-Agent: nx-platform-service-installer"
   )
   if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-    curl_args+=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+    curl_args+=(-H "Authorization: Bearer ${GITHUB_TOKEN}" -H "Accept: application/octet-stream")
   fi
   curl "${curl_args[@]}" "$url" -o "$output"
 }
@@ -181,7 +267,7 @@ download_release_archive() {
   local version="$2"
   local url archive
   url="$(service_release_url "$service" "$version")"
-  archive="${RELEASE_WORK_DIR}/${service}-${version}-linux-amd64.tar.gz"
+  archive="${RELEASE_WORK_DIR}/${service}-${version}-${RELEASE_TARGET_OS}-${RELEASE_TARGET_ARCH}.tar.gz"
   log "downloading ${service} release ${version}"
   download_file "$url" "$archive"
   printf '%s' "$archive"
@@ -199,13 +285,16 @@ extract_release_archive() {
 }
 
 normalize_defaults() {
+  : "${RELEASE_REPO_URL:=${GIT_REPO_URL:-https://github.com/your-org/nx-platform-service}}"
   : "${SERVICES:=gateway-service admin-service node-service}"
   : "${APP_ENV:=prod}"
-  : "${RELEASE_REPO_URL:=https://github.com/your-org/nx-platform-service}"
-  : "${RELEASE_VERSION:=v0.1.0}"
-  : "${GATEWAY_RELEASE_VERSION:=$RELEASE_VERSION}"
-  : "${ADMIN_RELEASE_VERSION:=$RELEASE_VERSION}"
-  : "${NODE_RELEASE_VERSION:=$RELEASE_VERSION}"
+  : "${RELEASE_VERSION:=}"
+  : "${RELEASE_TARGET_OS:=linux}"
+  : "${RELEASE_TARGET_ARCH:=amd64}"
+  : "${GITHUB_TOKEN:=${GIT_ACCESS_TOKEN:-}}"
+  : "${GATEWAY_RELEASE_VERSION:=}"
+  : "${ADMIN_RELEASE_VERSION:=}"
+  : "${NODE_RELEASE_VERSION:=}"
   : "${SERVICE_ROOT:=/opt}"
   : "${RUN_MIGRATIONS:=true}"
   : "${SEED_DEV:=false}"
@@ -252,13 +341,10 @@ service_selected() {
 validate_env() {
   local service version override
   for service in $SERVICES; do
-    version="$(service_release_version "$service")"
+    version="$(service_release_version_override "$service")"
     override="$(service_release_url_override "$service")"
-    if [[ -z "$version" && -z "$override" ]]; then
-      fail "release version or direct release URL is required for ${service}"
-    fi
-    if [[ -z "${RELEASE_REPO_URL:-}" && -z "$override" ]]; then
-      fail "RELEASE_REPO_URL is required when ${service} does not specify a direct release URL"
+    if [[ -z "$version" && -z "$override" && -z "${RELEASE_VERSION:-}" && -z "${RELEASE_REPO_URL:-}" ]]; then
+      fail "release version or repository URL is required for ${service}"
     fi
   done
 
@@ -499,9 +585,13 @@ restart_services() {
 main() {
   require_root
   normalize_defaults
+  normalize_repo_base_url
   validate_env
   detect_pkg_manager
   ensure_base_dependencies
+  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    command -v base64 >/dev/null 2>&1 || fail "required command not found: base64"
+  fi
   prepare_release_workspace
   trap cleanup_release_workspace EXIT
 
