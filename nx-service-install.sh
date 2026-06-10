@@ -1,17 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ENV_FILE="${ENV_FILE:-${1:-./scripts/install-from-release-linux.env}}"
-
-if [[ ! -f "$ENV_FILE" ]]; then
-  echo "env file not found: $ENV_FILE" >&2
-  exit 1
-fi
-
-set -a
-source "$ENV_FILE"
-set +a
-
 log() {
   printf '[install] %s\n' "$*" >&2
 }
