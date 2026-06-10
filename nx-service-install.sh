@@ -2,7 +2,7 @@
 set -euo pipefail
 
 log() {
-  printf '[install] %s\n' "$*"
+  printf '[install] %s\n' "$*" >&2
 }
 
 fail() {
@@ -199,7 +199,7 @@ latest_service_version() {
 
 service_release_version() {
   local service="$1"
-  local version
+  local version override_url
 
   version="$(service_release_version_override "$service")"
   if [[ -n "$version" ]]; then
@@ -208,6 +208,11 @@ service_release_version() {
   fi
   if [[ -n "${RELEASE_VERSION:-}" ]]; then
     printf '%s' "$RELEASE_VERSION"
+    return
+  fi
+  override_url="$(service_release_url_override "$service")"
+  if [[ -n "$override_url" ]]; then
+    printf '%s' "custom"
     return
   fi
   latest_service_version "$service"
@@ -228,6 +233,17 @@ service_release_url() {
   tag="$(url_encode "${service}/${version}")"
   asset="${service}-${version}-${RELEASE_TARGET_OS}-${RELEASE_TARGET_ARCH}.tar.gz"
   printf '%s/releases/download/%s/%s' "$REPO_BASE_URL" "$tag" "$asset"
+}
+
+service_release_display_version() {
+  local service="$1"
+  local version
+  version="$(service_release_version "$service")"
+  if [[ "$version" == "custom" ]]; then
+    printf '%s' "custom-url"
+    return
+  fi
+  printf '%s' "$version"
 }
 
 prepare_release_workspace() {
@@ -259,23 +275,28 @@ download_file() {
   if [[ -n "${GITHUB_TOKEN:-}" ]]; then
     curl_args+=(-H "Authorization: Bearer ${GITHUB_TOKEN}" -H "Accept: application/octet-stream")
   fi
-  curl "${curl_args[@]}" "$url" -o "$output"
+  if ! curl "${curl_args[@]}" "$url" -o "$output"; then
+    rm -f "$output"
+    fail "failed to download release asset: $url"
+  fi
 }
 
 download_release_archive() {
   local service="$1"
   local version="$2"
-  local url archive
-  url="$(service_release_url "$service" "$version")"
+  local url="$3"
+  local archive
   archive="${RELEASE_WORK_DIR}/${service}-${version}-${RELEASE_TARGET_OS}-${RELEASE_TARGET_ARCH}.tar.gz"
   log "downloading ${service} release ${version}"
   download_file "$url" "$archive"
+  [[ -s "$archive" ]] || fail "downloaded archive is empty or missing: $archive"
   printf '%s' "$archive"
 }
 
 extract_release_archive() {
   local service="$1"
   local archive="$2"
+  [[ -f "$archive" ]] || fail "release archive not found: $archive"
   local extract_root="${RELEASE_WORK_DIR}/extract/${service}"
   rm -rf "$extract_root"
   mkdir -p "$extract_root"
@@ -597,9 +618,12 @@ main() {
 
   local service
   for service in $SERVICES; do
-    local version archive package_dir
+    local version display_version url archive package_dir
     version="$(service_release_version "$service")"
-    archive="$(download_release_archive "$service" "$version")"
+    display_version="$(service_release_display_version "$service")"
+    url="$(service_release_url "$service" "$version")"
+    log "resolved ${service} release version=${display_version} url=${url}"
+    archive="$(download_release_archive "$service" "$version" "$url")"
     package_dir="$(extract_release_archive "$service" "$archive")"
     install_service_artifacts "$service" "$package_dir"
   done
