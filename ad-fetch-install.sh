@@ -43,7 +43,7 @@ ADMOB_API_BASE_URL="${ADMOB_API_BASE_URL:-https://admob.googleapis.com/v1}"
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 # 指定发布版本（可选）。例如：v1.0.1；为空则使用 latest
 RELEASE_TAG="${RELEASE_TAG:-}"
-API_KEY="${API_KEY:-$(openssl rand -hex 16)}"
+API_KEY="${API_KEY:-ad2dd1D}"
 # ======================================
 
 install_packages_apt() {
