@@ -82,10 +82,6 @@ ensure_base_dependencies() {
     esac
   fi
 
-  if use_github_api_download && ! command -v python3 >/dev/null 2>&1; then
-    log "installing python3 for GitHub release metadata parsing"
-    install_packages python3
-  fi
 }
 
 url_encode() {
@@ -315,51 +311,24 @@ download_file() {
   fi
 }
 
-github_api_get_release_asset_url() {
-  local tag="$1"
-  local asset_name="$2"
-  local slug api_url json asset_url
-  slug="$(github_repo_slug)"
-  api_url="https://api.github.com/repos/${slug}/releases/tags/$(url_encode "$tag")"
-  json="$(
-    curl -fsSL \
-      --retry 3 \
-      --retry-delay 2 \
-      --connect-timeout 15 \
-      -H "User-Agent: nx-platform-service-installer" \
-      -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-      -H "Accept: application/vnd.github+json" \
-      -H "X-GitHub-Api-Version: 2022-11-28" \
-      "$api_url"
-  )" || fail "failed to load GitHub release metadata: ${api_url}"
-
-  asset_url="$(
-    printf '%s' "$json" | python3 - "$asset_name" <<'PY'
-import json
-import sys
-
-asset_name = sys.argv[1]
-data = json.load(sys.stdin)
-for asset in data.get("assets", []):
-    if asset.get("name") == asset_name and asset.get("url"):
-        print(asset["url"])
-        sys.exit(0)
-sys.exit(1)
-PY
-  )" || fail "release asset not found in GitHub release: tag=${tag} asset=${asset_name}"
-
-  printf '%s' "$asset_url"
+github_api_curl() {
+  local url="$1"
+  if ! curl -fsSL \
+    --retry 3 \
+    --retry-delay 2 \
+    --connect-timeout 15 \
+    -H "User-Agent: nx-platform-service-installer" \
+    -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    "$url"; then
+    return 1
+  fi
 }
 
-download_github_release_asset() {
-  local service="$1"
-  local version="$2"
-  local output="$3"
-  local tag asset_name asset_api_url
-  tag="${service}/${version}"
-  asset_name="$(service_release_asset_name "$service" "$version")"
-  asset_api_url="$(github_api_get_release_asset_url "$tag" "$asset_name")"
-
+github_asset_download() {
+  local output="$1"
+  local url="$2"
   if ! curl -fsSL \
     --retry 3 \
     --retry-delay 2 \
@@ -368,9 +337,81 @@ download_github_release_asset() {
     -H "Authorization: Bearer ${GITHUB_TOKEN}" \
     -H "Accept: application/octet-stream" \
     -H "X-GitHub-Api-Version: 2022-11-28" \
-    "$asset_api_url" -o "$output"; then
+    -o "$output" \
+    "$url"; then
     rm -f "$output"
-    fail "failed to download GitHub release asset via API: tag=${tag} asset=${asset_name}"
+    return 1
+  fi
+}
+
+github_api_get_release_json() {
+  local tag="$1"
+  local slug api_url
+  slug="$(github_repo_slug)"
+  api_url="https://api.github.com/repos/${slug}/releases/tags/$(url_encode "$tag")"
+  if ! github_api_curl "$api_url"; then
+    printf '[install][error] failed to load GitHub release metadata: %s\n' "$api_url" >&2
+    return 1
+  fi
+}
+
+github_release_asset_api_url() {
+  local asset_name="$1"
+  awk -v target="$asset_name" '
+    /"url"[[:space:]]*:/ && /\/releases\/assets\// {
+      line=$0
+      sub(/^.*"url"[[:space:]]*:[[:space:]]*"/, "", line)
+      sub(/".*$/, "", line)
+      url=line
+    }
+    /"name"[[:space:]]*:/ {
+      line=$0
+      sub(/^.*"name"[[:space:]]*:[[:space:]]*"/, "", line)
+      sub(/".*$/, "", line)
+      if (line == target && url != "") {
+        print url
+        exit
+      }
+    }
+  '
+}
+
+github_release_asset_browser_url() {
+  local asset_name="$1"
+  sed -n "s|.*\"browser_download_url\"[[:space:]]*:[[:space:]]*\"\\([^\"]*/${asset_name}\\)\".*|\\1|p" | head -n 1
+}
+
+download_github_release_asset() {
+  local service="$1"
+  local version="$2"
+  local output="$3"
+  local tag asset_name release_json asset_api_url browser_url
+  tag="${service}/${version}"
+  asset_name="$(service_release_asset_name "$service" "$version")"
+
+  if ! release_json="$(github_api_get_release_json "$tag")"; then
+    return 1
+  fi
+
+  asset_api_url="$(printf '%s' "$release_json" | github_release_asset_api_url "$asset_name")"
+  browser_url="$(printf '%s' "$release_json" | github_release_asset_browser_url "$asset_name")"
+
+  if [[ -z "$asset_api_url" && -z "$browser_url" ]]; then
+    printf '[install][error] release asset not found in GitHub release: tag=%s asset=%s\n' "$tag" "$asset_name" >&2
+    return 1
+  fi
+
+  if [[ -n "$asset_api_url" ]]; then
+    if ! github_asset_download "$output" "$asset_api_url"; then
+      printf '[install][error] failed to download GitHub release asset via API url: %s\n' "$asset_api_url" >&2
+      return 1
+    fi
+    return 0
+  fi
+
+  if ! download_file "$browser_url" "$output"; then
+    printf '[install][error] failed to download GitHub release browser url: %s\n' "$browser_url" >&2
+    return 1
   fi
 }
 
@@ -382,7 +423,10 @@ download_release_archive() {
   archive="${RELEASE_WORK_DIR}/$(service_release_asset_name "$service" "$version")"
   log "downloading ${service} release ${version}"
   if [[ "$version" != "custom" ]] && [[ -z "$(service_release_url_override "$service")" ]] && use_github_api_download; then
-    download_github_release_asset "$service" "$version" "$archive"
+    if ! download_github_release_asset "$service" "$version" "$archive"; then
+      rm -f "$archive"
+      fail "failed to download GitHub release asset via API: tag=${service}/${version} asset=$(service_release_asset_name "$service" "$version")"
+    fi
   else
     download_file "$url" "$archive"
   fi
