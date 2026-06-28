@@ -7,9 +7,12 @@
 # - Install the nx-node binary and bundled example files.
 # - Create/update a systemd service and start nx-node.manager.
 # - Preserve an existing /etc/nx-node/config.json.
+# - Generate config from either AGENT_ID/AGENT_SECRET/PANEL_URL or PANEL_URL for asset.config registration.
+# - Optionally generate /etc/nx-platform/asset.config from MACHINE_ID/TRUST_TOKEN.
+# - Optionally set AGENT_CREDENTIAL_FILE to choose where nx-node stores registered credentials.
 #
 # Non-responsibilities:
-# - Does not register an Agent on the panel.
+# - Does not call the Agent register API itself; nx-node performs first-start registration.
 # - Does not validate backend API connectivity.
 # - Does not manage kernel resource state after the service starts.
 
@@ -22,8 +25,17 @@ INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 CONFIG_DIR="${CONFIG_DIR:-/etc/nx-node}"
 CONFIG_FILE="${CONFIG_FILE:-${CONFIG_DIR}/config.json}"
 ORIGINAL_CONFIG="${ORIGINAL_CONFIG:-${CONFIG_DIR}/sing_origin.json}"
+ASSET_CONFIG_DIR="${ASSET_CONFIG_DIR:-/etc/nx-platform}"
+ASSET_CONFIG_FILE="${ASSET_CONFIG_FILE:-${ASSET_CONFIG_DIR}/asset.config}"
 START_SERVICE="${START_SERVICE:-1}"
+AGENT_ROLE="${AGENT_ROLE:-node}"
+PROBE_ENABLE="${PROBE_ENABLE:-1}"
+PROBE_INTERVAL="${PROBE_INTERVAL:-60}"
+PROBE_TIMEOUT="${PROBE_TIMEOUT:-5}"
+PROBE_TARGET_URL="${PROBE_TARGET_URL:-https://cp.cloudflare.com/generate_204}"
+PROBE_CONCURRENCY="${PROBE_CONCURRENCY:-8}"
 GIT_TOKEN="${GIT_TOKEN:-${GITHUB_TOKEN:-}}"
+TMP_DIR=""
 
 die() {
   echo "ERROR: $*" >&2
@@ -32,6 +44,12 @@ die() {
 
 info() {
   echo "==> $*"
+}
+
+cleanup() {
+  if [ -n "${TMP_DIR:-}" ] && [ -d "$TMP_DIR" ]; then
+    rm -rf "$TMP_DIR"
+  fi
 }
 
 need_root() {
@@ -184,6 +202,9 @@ install_files() {
   if [ -f "${tmp_dir}/package/config.json" ]; then
     install -m 0644 "${tmp_dir}/package/config.json" "${CONFIG_DIR}/config.json.example"
   fi
+  if [ -f "${tmp_dir}/package/probe-config.json" ]; then
+    install -m 0644 "${tmp_dir}/package/probe-config.json" "${CONFIG_DIR}/probe-config.json.example"
+  fi
   for name in dns.json route.json custom_inbound.json custom_outbound.json geoip.dat geoip.db geosite.dat geosite.db; do
     if [ -f "${tmp_dir}/package/${name}" ]; then
       install -m 0644 "${tmp_dir}/package/${name}" "${CONFIG_DIR}/${name}.example"
@@ -196,10 +217,18 @@ json_escape() {
 }
 
 write_generated_config() {
-  local agent_id agent_secret panel_url
+  local agent_id agent_secret panel_url credential_file
   agent_id="$(json_escape "${AGENT_ID:-}")"
   agent_secret="$(json_escape "${AGENT_SECRET:-}")"
   panel_url="$(json_escape "${PANEL_URL:-}")"
+  credential_file="$(json_escape "${AGENT_CREDENTIAL_FILE:-${CONFIG_DIR}/agent-credentials.json}")"
+  local role probe_enable probe_target_url
+  role="$(json_escape "${AGENT_ROLE}")"
+  probe_target_url="$(json_escape "${PROBE_TARGET_URL}")"
+  probe_enable="false"
+  if [ "$PROBE_ENABLE" = "1" ] || [ "$PROBE_ENABLE" = "true" ]; then
+    probe_enable="true"
+  fi
 
   cat >"$CONFIG_FILE" <<EOF
 {
@@ -212,9 +241,9 @@ write_generated_config() {
     "Secret": "${agent_secret}",
     "Server": "${panel_url}",
     "BindIP": "",
-    "Timeout": 30
-  },
-  "Sync": {
+    "Timeout": 30,
+    "Role": "${role}",
+    "CredentialFile": "${credential_file}",
     "PullInterval": 60,
     "ReportInterval": 60,
     "FullSyncOnStart": true
@@ -230,6 +259,13 @@ write_generated_config() {
       "ServerPort": 0
     },
     "OriginalPath": "${ORIGINAL_CONFIG}"
+  },
+  "Probe": {
+    "Enable": ${probe_enable},
+    "Interval": ${PROBE_INTERVAL},
+    "Timeout": ${PROBE_TIMEOUT},
+    "TargetURL": "${probe_target_url}",
+    "Concurrency": ${PROBE_CONCURRENCY}
   },
   "Defaults": {
     "ListenIP": "0.0.0.0",
@@ -249,6 +285,21 @@ write_generated_config() {
 }
 EOF
   chmod 0600 "$CONFIG_FILE"
+}
+
+write_asset_config() {
+  local machine_id trust_token
+  machine_id="$(json_escape "${MACHINE_ID:-}")"
+  trust_token="$(json_escape "${TRUST_TOKEN:-}")"
+
+  install -d -m 0700 "$ASSET_CONFIG_DIR"
+  cat >"$ASSET_CONFIG_FILE" <<EOF
+{
+  "machine_id": "${machine_id}",
+  "trust_token": "${trust_token}"
+}
+EOF
+  chmod 0600 "$ASSET_CONFIG_FILE"
 }
 
 write_original_config() {
@@ -330,21 +381,37 @@ EOF
 }
 
 prepare_config() {
+  if [ -n "${MACHINE_ID:-}" ] || [ -n "${TRUST_TOKEN:-}" ]; then
+    if [ -z "${MACHINE_ID:-}" ] || [ -z "${TRUST_TOKEN:-}" ]; then
+      die "MACHINE_ID and TRUST_TOKEN must be set together when generating ${ASSET_CONFIG_FILE}"
+    fi
+    if [ -f "$ASSET_CONFIG_FILE" ]; then
+      info "Keeping existing asset config: ${ASSET_CONFIG_FILE}"
+    else
+      info "Generating asset config: ${ASSET_CONFIG_FILE}"
+      write_asset_config
+    fi
+  fi
+
   if [ -f "$CONFIG_FILE" ]; then
     info "Keeping existing config: ${CONFIG_FILE}"
   elif [ -n "${CONFIG_URL:-}" ]; then
     info "Downloading config from CONFIG_URL"
     github_curl -o "$CONFIG_FILE" "$CONFIG_URL" || die "failed to download config"
     chmod 0600 "$CONFIG_FILE"
-  elif [ -n "${AGENT_ID:-}" ] && [ -n "${AGENT_SECRET:-}" ] && [ -n "${PANEL_URL:-}" ]; then
-    info "Generating config from AGENT_ID/AGENT_SECRET/PANEL_URL"
+  elif [ -n "${PANEL_URL:-}" ] && { { [ -z "${AGENT_ID:-}" ] && [ -z "${AGENT_SECRET:-}" ]; } || { [ -n "${AGENT_ID:-}" ] && [ -n "${AGENT_SECRET:-}" ]; }; }; then
+    info "Generating config from provided Agent credentials"
     write_generated_config
   else
     if [ -f "${CONFIG_DIR}/config.json.example" ]; then
       cp "${CONFIG_DIR}/config.json.example" "$CONFIG_FILE"
       chmod 0600 "$CONFIG_FILE"
     fi
-    die "config is not ready. Set CONFIG_URL or AGENT_ID/AGENT_SECRET/PANEL_URL, or edit ${CONFIG_FILE} and rerun."
+    die "config is not ready. Set CONFIG_URL, PANEL_URL, or AGENT_ID/AGENT_SECRET/PANEL_URL; or edit ${CONFIG_FILE} and rerun."
+  fi
+
+  if [ "$AGENT_ROLE" = "probe" ]; then
+    return
   fi
 
   if [ ! -f "$ORIGINAL_CONFIG" ]; then
@@ -393,13 +460,13 @@ main() {
   command -v systemctl >/dev/null 2>&1 || die "systemd is required"
   install_deps
 
-  local asset tmp_dir
+  local asset
   asset="$(detect_asset)"
-  tmp_dir="$(mktemp -d)"
-  trap 'rm -rf "$tmp_dir"' EXIT
+  TMP_DIR="$(mktemp -d)"
+  trap cleanup EXIT
 
-  download_release "$tmp_dir" "$asset"
-  install_files "$tmp_dir"
+  download_release "$TMP_DIR" "$asset"
+  install_files "$TMP_DIR"
   prepare_config
   install_service
   start_service
