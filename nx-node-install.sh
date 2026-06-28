@@ -7,7 +7,7 @@
 # - Install the nx-node binary and bundled example files.
 # - Create/update a systemd service and start nx-node.manager.
 # - Preserve an existing /etc/nx-node/config.json.
-# - Generate config from either AGENT_ID/AGENT_SECRET/PANEL_URL or PANEL_URL for asset.config registration.
+# - Generate config from either AGENT_ID/AGENT_SECRET/SERVER or SERVER for asset.config registration.
 # - Optionally generate /etc/nx-platform/asset.config from MACHINE_ID/TRUST_TOKEN.
 # - Optionally set AGENT_CREDENTIAL_FILE to choose where nx-node stores registered credentials.
 #
@@ -35,6 +35,7 @@ PROBE_TIMEOUT="${PROBE_TIMEOUT:-5}"
 PROBE_TARGET_URL="${PROBE_TARGET_URL:-https://cp.cloudflare.com/generate_204}"
 PROBE_CONCURRENCY="${PROBE_CONCURRENCY:-8}"
 GIT_TOKEN="${GIT_TOKEN:-${GITHUB_TOKEN:-}}"
+SERVER="${SERVER:-${AGENT_SERVER:-${PANEL_URL:-}}}"
 TMP_DIR=""
 
 die() {
@@ -217,10 +218,10 @@ json_escape() {
 }
 
 write_generated_config() {
-  local agent_id agent_secret panel_url credential_file
+  local agent_id agent_secret server_url credential_file
   agent_id="$(json_escape "${AGENT_ID:-}")"
   agent_secret="$(json_escape "${AGENT_SECRET:-}")"
-  panel_url="$(json_escape "${PANEL_URL:-}")"
+  server_url="$(json_escape "${SERVER}")"
   credential_file="$(json_escape "${AGENT_CREDENTIAL_FILE:-${CONFIG_DIR}/agent-credentials.json}")"
   local role probe_enable probe_target_url
   role="$(json_escape "${AGENT_ROLE}")"
@@ -239,7 +240,7 @@ write_generated_config() {
   "Agent": {
     "ID": "${agent_id}",
     "Secret": "${agent_secret}",
-    "Server": "${panel_url}",
+    "Server": "${server_url}",
     "BindIP": "",
     "Timeout": 30,
     "Role": "${role}",
@@ -312,7 +313,7 @@ write_original_config() {
         "address": "1.1.1.1"
       }
     ],
-    "strategy": "prefer_ipv4 "
+    "strategy": "prefer_ipv4"
   },
   "outbounds": [
     {
@@ -320,7 +321,7 @@ write_original_config() {
       "type": "direct",
       "domain_resolver": {
         "server": "cf",
-        "strategy": "prefer_ipv4 "
+        "strategy": "prefer_ipv4"
       }
     },
     {
@@ -399,7 +400,7 @@ prepare_config() {
     info "Downloading config from CONFIG_URL"
     github_curl -o "$CONFIG_FILE" "$CONFIG_URL" || die "failed to download config"
     chmod 0600 "$CONFIG_FILE"
-  elif [ -n "${PANEL_URL:-}" ] && { { [ -z "${AGENT_ID:-}" ] && [ -z "${AGENT_SECRET:-}" ]; } || { [ -n "${AGENT_ID:-}" ] && [ -n "${AGENT_SECRET:-}" ]; }; }; then
+  elif [ -n "${SERVER:-}" ] && { { [ -z "${AGENT_ID:-}" ] && [ -z "${AGENT_SECRET:-}" ]; } || { [ -n "${AGENT_ID:-}" ] && [ -n "${AGENT_SECRET:-}" ]; }; }; then
     info "Generating config from provided Agent credentials"
     write_generated_config
   else
@@ -407,7 +408,7 @@ prepare_config() {
       cp "${CONFIG_DIR}/config.json.example" "$CONFIG_FILE"
       chmod 0600 "$CONFIG_FILE"
     fi
-    die "config is not ready. Set CONFIG_URL, PANEL_URL, or AGENT_ID/AGENT_SECRET/PANEL_URL; or edit ${CONFIG_FILE} and rerun."
+    die "config is not ready. Set CONFIG_URL, SERVER, AGENT_SERVER, PANEL_URL, or AGENT_ID/AGENT_SECRET/SERVER; or edit ${CONFIG_FILE} and rerun."
   fi
 
   if [ "$AGENT_ROLE" = "probe" ]; then
